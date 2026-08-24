@@ -286,6 +286,11 @@ suite "market actions":
     sim.seats[1].hand = @[0]
     sim.acted[1] = false
     check sim.checkAct(1, newAction("endorse", 4)) == "already_endorsed"
+    ## A burned seal is off the board: there is nothing left to co-sign, and
+    ## the reason is no_such_theory rather than already_endorsed.
+    sim.seals[0].status = sealBurned
+    check sim.checkAct(1, newAction("endorse", 4)) == "no_such_theory"
+    check sim.checkAct(2, newAction("endorse", 4)) == "no_such_theory"
 
   test "buying an artifact is once each and never on credit":
     var sim = opened(fixtureConfig(seed = 13))
@@ -410,6 +415,31 @@ suite "same-phase conflicts":
     check sim.allActed()
     sim.drive()
     check not sim.done
+
+  test "a second endorse of the same seal is a recorded rejection":
+    ## The reason token is pinned through checkAct in "endorse moves a coin
+    ## to the author and never repeats"; this pins the recorded EVENT and the
+    ## stipend, the way note test 12 asks for every rejection.
+    var sim = opened(fixtureConfig(seed = 21))
+    sim.allPass()
+    check sim.phase == phMarket
+    sim.pinSeal(0, 4, 3)
+    sim.applyAct(1, newAction("endorse", 4), true)
+    sim.passOthers(1)
+    sim.drive()
+    check sim.phase == phLab
+    sim.allPass()
+    check sim.phase == phMarket
+    let stipend = sim.seats[1].coin
+    check sim.applyOrReject(1, newAction("endorse", 4)) == "already_endorsed"
+    check sim.seats[1].coin == stipend + PassCoin
+    check sim.seals[0].endorsers == @[1]
+    var rejected: GameEvent
+    for event in sim.events:
+      if event.kind == evAct and event.seat == 1:
+        rejected = event
+    check rejected.outcome == "rejected:already_endorsed"
+    check rejected.action == "endorse"
 
 suite "the exhibition":
   test "true seals pay and false seals cost, and burned seals are not rescored":
