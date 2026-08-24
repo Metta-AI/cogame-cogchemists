@@ -191,6 +191,41 @@ suite "chrome provenance":
     ## is only logged.
     check "--strict-text-bounds" in readRepoFile(".github/workflows/ci.yml")
 
+  test "a worst-case frame is drawn in CI, because no CI replay can talk":
+    ## CI has no ANTHROPIC_API_KEY, so every seat plays `scriptedAction`,
+    ## which "never talks or notes" — every replay CI produces carries zero
+    ## `say`, and the wasm-viewer job therefore never draws a bubble at all.
+    ## That is how the clipping above reached production with a green board.
+    ## tools/ci/renderer_fixture.html closes it by driving the renderer with
+    ## a full-length remark on every seat, at five canvas sizes.
+    check "never talks or notes" in readRepoFile("src/cogchemists/llm.nim")
+    let fixture = readRepoFile("tools/ci/renderer_fixture.html")
+    ## It drives the real renderer, not a copy of it.
+    check "./renderer.js" in fixture
+    check "CogchemistsRenderer.makeRenderer" in fixture
+    check "makeRenderer: makeRenderer," in readRepoFile("client/renderer.js")
+    ## Every seat speaks, and the fixture CHECKS its own remarks are the full
+    ## MaxSayLen at runtime (a quietly shortened one would leave the fixture
+    ## passing while testing less than it claims), so the only thing to pin
+    ## here is that its cap is the server's.
+    var cap = ""
+    for line in readRepoFile("src/cogchemists/sim.nim").splitLines():
+      let trimmed = line.strip()
+      if trimmed.startsWith("MaxSayLen* = "):
+        cap = trimmed["MaxSayLen* = ".len .. ^1].strip()
+    check cap.len > 0
+    check ("var CAP = " & cap & ";") in fixture
+    check "data-replay-error" in fixture
+    check "Array.from(say).length === CAP" in fixture
+    ## The frame is ANIMATED: the bench slides its cards on from off-frame,
+    ## and a still frame frozen mid-slide would fail the gate for a reason
+    ## that is not a bug.
+    check "requestAnimationFrame(step)" in fixture
+    ## And CI actually runs it, under the same bar.
+    let ci = readRepoFile(".github/workflows/ci.yml")
+    check "tools/ci/renderer_fixture.html" in ci
+    check ci.count("\n            --strict-text-bounds") == 2
+
   test "the replay viewer is a static bundle, never a pod":
     let manifest = readRepoFile("coworld_manifest_template.json")
     check "\"replay_viewer\": {" in manifest

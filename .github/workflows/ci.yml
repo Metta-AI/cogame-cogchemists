@@ -322,6 +322,44 @@ jobs:
             --soak 15 \
             --strict-text-bounds
 
+      - name: Draw the worst-case frame
+        # The step above proves the viewer LOADS a replay. It cannot prove the
+        # viewer draws a speech bubble, because CI has no ANTHROPIC_API_KEY:
+        # every seat falls back to `scriptedAction`, which never talks, so no
+        # replay CI can produce carries a single `say`. That is exactly how
+        # bubbles clipped off the top of the canvas reached production on
+        # 2026-08-24 with every gate green.
+        #
+        # So drive the renderer directly with a frame built to hurt -- a
+        # MaxSayLen remark on every seat at five canvas sizes -- and hold it
+        # to the same --strict-text-bounds bar.
+        run: |
+          set -euo pipefail
+          fixture=dist/renderer-fixture
+          rm -rf "${fixture}"
+          mkdir -p "${fixture}/assets"
+          cp tools/ci/renderer_fixture.html "${fixture}/index.html"
+          cp client/renderer.js "${fixture}/renderer.js"
+          cp data/*.png "${fixture}/assets/"
+          # viewer_smoke's --bundle mode wants a replay to append as ?replay=;
+          # the fixture ignores it and builds its own frames.
+          printf '{}' > "${fixture}/unused.replay"
+          node tools/ci/viewer_smoke.mjs \
+            --bundle "${fixture}" \
+            --replay "${fixture}/unused.replay" \
+            --timeout 60 \
+            --strict-text-bounds \
+            --out dist/renderer-fixture-evidence
+
+      - name: Upload the worst-case frame evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-fixture
+          path: dist/renderer-fixture-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload the viewer smoke evidence
         # Always: the screenshot and the JSON are most useful when the job is red.
         if: always()

@@ -1858,6 +1858,11 @@
   }
 
   window.CogchemistsRenderer = {
+    // Exported for tools/ci/renderer_fixture.html, which drives the scene
+    // directly with a worst-case frame. CI replays are played by the scripted
+    // baselines, which never talk, so nothing that plays a replay can put a
+    // speech bubble on screen.
+    makeRenderer: makeRenderer,
     attachLive: attachLive,
     attachReplay: attachReplay,
     renderFeed: renderFeed,
