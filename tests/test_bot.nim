@@ -40,17 +40,21 @@ proc playScripted(config: GameConfig, kinds: array[Seats, ScriptKind],
       let decision = scriptedAction(result, seat, kinds[seat])
       ## The bounded/legal assertion: the bot's action must be a member of
       ## the legal set AT THE MOMENT IT IS PLAYED, not merely survive
-      ## applyAct.
-      check showAct(decision) in result.legalMoves(seat)
-      check decision.say.len == 0
-      check decision.notes.len == 0
+      ## applyAct. doAssert, not check: this runs outside the test body, and
+      ## a failure has to abort with the offending move rather than tick a
+      ## counter nobody reads.
+      doAssert showAct(decision) in result.legalMoves(seat),
+        "illegal scripted move: " & showAct(decision) & " (seat " & $seat &
+        ", round " & $result.round & ", " & $result.phase & ")"
+      doAssert decision.say.len == 0, "a scripted seat never talks"
+      doAssert decision.notes.len == 0, "a scripted seat never takes notes"
       if decision.action == "publish" and
           not result.grids[seat].solved(decision.a):
         inc tally.unsolvedPublishes
       ## applyAct raises on anything illegal and would fail this test.
       result.applyAct(seat, decision, true)
-      check result.seats[seat].coin >= 0
-      check result.seats[seat].hand.len <= HandCap
+      doAssert result.seats[seat].coin >= 0, "coin went negative"
+      doAssert result.seats[seat].hand.len <= HandCap, "hand cap exceeded"
     result.drive()
   for seat in 0 ..< Seats:
     tally.falseAtExhibition += result.falseTheories[seat]

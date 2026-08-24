@@ -161,6 +161,12 @@ proc handValues(sim: Sim, seat: int): seq[int] =
 proc tryAct(sim: Sim, seat: int, act: Action): bool =
   sim.checkAct(seat, act).len == 0
 
+proc orderedPair(x, y: int): (int, int) =
+  ## Mixing is symmetric, but LEGAL MOVES spells every pair with the lower
+  ## ingredient first — so a baseline must too, or its action is legal and
+  ## yet not a member of the set the prompt (and test_bot) checks against.
+  if x <= y: (x, y) else: (y, x)
+
 proc assayerLab(sim: Sim, seat: int, sample: seq[Chemistry]): Action =
   let me = sim.seats[seat]
   if me.hand.len < 2:
@@ -245,7 +251,8 @@ proc quackLab(sim: Sim, seat: int): Action =
   var second = rng.rand(hand.high)
   if second == first:
     second = (first + 1) mod hand.len
-  let act = newAction("test_self", hand[first], hand[second])
+  let pair = orderedPair(hand[first], hand[second])
+  let act = newAction("test_self", pair[0], pair[1])
   if sim.tryAct(seat, act):
     return act
   newAction("pass")
@@ -263,7 +270,8 @@ proc quackMarket(sim: Sim, seat: int): Action =
       return act
   let hand = sim.seats[seat].hand
   if hand.len >= 2:
-    let act = newAction("sell", hand[0], hand[1])
+    let pair = orderedPair(hand[0], hand[1])
+    let act = newAction("sell", pair[0], pair[1])
     if sim.tryAct(seat, act):
       return act
   newAction("pass")
