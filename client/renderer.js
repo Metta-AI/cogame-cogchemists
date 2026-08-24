@@ -213,6 +213,7 @@
 
     drawBench(ctx, L, view, now, fx);
     drawBoard(ctx, L, view, now, fx);
+    drawTruthRow(ctx, L, view);
     drawGridStrip(ctx, L, view);
   }
 
@@ -509,17 +510,70 @@
       ctx.restore();
       return;
     }
+    // At the exhibition the truth row takes the bottom of the board, so the
+    // seals stack above it and every verdict tag stays visible.
+    var chemistry = view.chemistry || [];
+    var revealed = chemistry.length === 8;
+    var reserve = revealed ? truthRowH(L) + 6 : 0;
     var top = rect.y + 20 * scale;
     var cardH = Math.max(30, Math.min(58 * scale,
-      (rect.h - 26 * scale) / seals.length));
+      (rect.h - 26 * scale - reserve) / seals.length));
     seals.forEach(function (seal, i) {
+      // Burned seals settled at the burn and are not re-scored; every other
+      // standing seal is opened against the truth.
+      var verdict = null;
+      if (revealed && seal.status !== "burned") {
+        verdict = chemistry[seal.ingredient] === seal.claim;
+      }
       drawSeal(ctx, rect.x + 6, top + i * (cardH + 3), rect.w - 12,
         cardH - 1, seal, view, scale, L.narrow,
-        fx.burnAt ? fx.burnAt[seal.ingredient] : null, now);
+        fx.burnAt ? fx.burnAt[seal.ingredient] : null, now, verdict);
     });
   }
 
-  function drawSeal(ctx, x, y, w, h, seal, view, scale, narrow, burnAt, now) {
+  // The endcard reveal: the eight true signatures, drawn once, large, in a
+  // row under the board at the exhibition frame.
+  function truthRowH(L) {
+    return Math.max(24, Math.min(38 * L.scale, L.main.h * 0.16));
+  }
+
+  function drawTruthRow(ctx, L, view) {
+    var chemistry = view.chemistry || [];
+    if (chemistry.length !== 8) return;
+    var scale = L.scale;
+    var h = truthRowH(L);
+    var x = L.main.x;
+    var w = L.board.x + L.board.w - x;
+    var y = L.main.y + L.main.h - h;
+    var cellW = w / 8;
+    ctx.save();
+    ctx.fillStyle = "rgba(18, 13, 9, 0.88)";
+    roundRect(ctx, x, y, w, h, 6 * scale);
+    ctx.fill();
+    ctx.strokeStyle = rgba(AMBER, 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.textAlign = "center";
+    for (var i = 0; i < 8; i++) {
+      var cx = x + cellW * (i + 0.5);
+      ctx.textBaseline = "top";
+      ctx.font = "700 " + Math.round(8.5 * scale) +
+        "px 'rajdhani', system-ui, sans-serif";
+      ctx.fillStyle = PAPER_DIM;
+      ctx.fillText(ellipsize(ctx, ingredientName(view, i), cellW - 4), cx,
+        y + 3);
+      ctx.textBaseline = "bottom";
+      ctx.font = "700 " +
+        Math.round(Math.max(9, Math.min(16 * scale, cellW / 3.6))) +
+        "px 'rajdhani', system-ui, sans-serif";
+      ctx.fillStyle = AMBER;
+      ctx.fillText(signatureName(view, chemistry[i]), cx, y + h - 3);
+    }
+    ctx.restore();
+  }
+
+  function drawSeal(ctx, x, y, w, h, seal, view, scale, narrow, burnAt, now,
+      verdict) {
     var burned = seal.status === "burned";
     var tilt = burned ? 0.05 : 0;
     ctx.save();
@@ -588,6 +642,11 @@
       drawTag(ctx, x + w / 2, y + h / 2,
         "BURNED BY " + String(names[seal.burnedBy] || "?").toUpperCase(),
         COLOR_HEX.red, scale);
+    } else if (verdict === true) {
+      drawTag(ctx, x + w / 2, y + h / 2, "TRUE +5", AMBER, scale);
+    } else if (verdict === false) {
+      drawTag(ctx, x + w / 2, y + h / 2, "FALSE \u22126", COLOR_HEX.red,
+        scale);
     }
     void burnAt;
     void now;
