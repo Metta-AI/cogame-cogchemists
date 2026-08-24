@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cogchemists — Player View</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">COG<span>CHEMISTS</span></div>
+      <div id="clock">ROUND 0</div>
+      <div id="topright">
+        <span id="statuschip">connecting…</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="labbar"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<script src="/client/renderer.js"></script>
+<script>
+  // View-only: a Cogchemists policy is a prompt, so this page never
+  // opens the /player socket -- the certifier probes it before the
+  // player pods start and a second socket on a slot would be a defect.
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  function buildLabBar() {
+    return document.getElementById("labbar");
+  }
+  function relayout() {
+    var root = document.documentElement;
+    root.style.setProperty("--band", "0px");
+    root.style.setProperty("--hudscale",
+      String(Math.max(0.8, Math.min(1.15, window.innerWidth / 960))));
+    fit();
+  }
+  window.addEventListener("resize", relayout);
+  window.addEventListener("load", relayout);
+  relayout();
+  CogchemistsRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+  CogchemistsRenderer.attachLive({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    status: document.getElementById("statuschip"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    labbar: buildLabBar(),
+    endscreen: document.getElementById("endscreen"),
+    assetBase: "/client/assets",
+    wsPath: "/global",
+    onFrame: function (data) {
+      if (data.type === "state" && data.game) {
+        document.getElementById("statuschip").textContent = "spectating";
+      }
+    }
+  });
+</script>
+</body>
+</html>

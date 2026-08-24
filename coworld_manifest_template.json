@@ -1,0 +1,476 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "deduction",
+    "alchemy",
+    "hidden-information",
+    "reputation",
+    "llm-driven",
+    "turn-based",
+    "four-player",
+    "bluffing"
+  ],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "cogchemists",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Cogchemists: eight ingredients, a hidden chemistry, and a career built on publishing first. Four LLM-piloted cogs share one laboratory for six rounds. Behind the game sits a secret bijection from the eight ingredients (Nightcap, Emberroot, Fen Lily, Widow's Salt, Copper Fern, Gravebloom, Sunmoss, Rime Thistle) to the eight alchemical SIGNATURES - triples of signs over RED, GREEN and BLUE, written R+G-B+. Mixing two ingredients yields a potion that leaks exactly one constraint about that bijection: if the two signatures disagree on exactly one aspect the potion takes that colour and its sign is the product of the two aspects they agree on; otherwise it is MUD. Each round has two simultaneous-decision phases. In LAB a seat forages, tests a pair on a paid student (result private), drinks it itself (the sign class becomes public and a negative potion poisons you), transmutes a card for coin, or passes. In MARKET it sells a potion to an adventurer who named a specific result, PUBLISHES a wax-sealed theory about one ingredient for immediate reputation and royalties, endorses a rival's seal, DEBUNKS one by public demonstration - which burns the seal only if the attacker brought a reagent that exposes it, and costs the attacker reputation if it does not - buys an artifact, or passes. After the last round the exhibition opens every standing seal against the truth: true pays the author +5 reputation, false costs -6. SCORE = reputation + 0.2 x coin, higher is better, and it may be negative. The ingredients a seat burns are public and its results are not, so every seat sees a different world; the replay shows all four private deduction grids like a hole-cam, so spectators can see who actually knows and who is bluffing. The game is LLM-driven: every phase the server sends each seat's policy prompt plus its hand, the board, the public record and its exact deduction grid to Claude as ONE parallel batch, so A POLICY IS JUST A PROMPT - build one by reusing the published cogchemists-player runnable with PLAYER_PROMPT set to your strategy. Two scripted baselines (assayer, quack) play any seat that registers as scripted, and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{COGCHEMISTS_IMAGE}}",
+      "run": [
+        "/bin/cogchemists"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogchemists/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogchemists/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Cogchemists is a four-player game.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 4
+        },
+        "seed": {
+          "description": "Pins the hidden chemistry, the adventurer demands, the ingredient supply and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "rounds": {
+          "description": "Rounds of lab-then-market in the episode.",
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 10,
+          "default": 6
+        },
+        "talk": {
+          "description": "Whether seats may post one short seminar remark a phase (non-binding free text, delivered to every seat next phase).",
+          "type": "boolean",
+          "default": true
+        },
+        "artifacts": {
+          "description": "Whether the Magic Mortar and the Printing Press are on sale.",
+          "type": "boolean",
+          "default": true
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between phases at 60% of it, the exhibition still runs, and results plus the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between phases.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 250
+        },
+        "minBatchSpacingMs": {
+          "description": "Wall-clock floor between the STARTS of consecutive LLM batches; the hosted Bedrock sidecar caps 30 requests per minute per episode and four seats per batch can outrun it. Skipped entirely when no LLM credentials are present.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 10000
+        },
+        "shutdownGraceSeconds": {
+          "description": "How long /healthz and /global keep answering after the artifacts are written; the certifier pings /global after the player pods start.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "default": 20
+        },
+        "model": {
+          "description": "Claude model for the direct-Anthropic transport (ANTHROPIC_API_KEY). Hosted Bedrock ignores this and rotates through its own haiku-first candidate list; set BEDROCK_MODEL to pin one.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 20
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "reputation",
+        "coin",
+        "published",
+        "trueTheories",
+        "falseTheories",
+        "burned",
+        "debunks",
+        "rounds",
+        "maxRounds",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "reputation + 0.2 x coin. Higher is better, and it may be negative.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "reputation": {
+          "description": "Final reputation per seat, after the exhibition.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "coin": {
+          "description": "Final coin per seat.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "published": {
+          "description": "Wax seals this seat pinned over the episode.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "trueTheories": {
+          "description": "Standing seals the exhibition proved true.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "falseTheories": {
+          "description": "Standing seals the exhibition proved false.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "burned": {
+          "description": "This seat's seals burned by a rival's demonstration.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "debunks": {
+          "description": "Demonstrations by this seat that burned a rival's seal.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "rounds": {
+          "description": "Rounds actually played.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxRounds": {
+          "description": "The episode's round count after budget fitting.",
+          "type": "integer",
+          "minimum": 3
+        },
+        "reason": {
+          "description": "How the episode ended: complete (all rounds played and the exhibition held) or deadline (the episode clock; the exhibition still ran on the board as it stood).",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "cogchemists.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Cogchemists policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's hand, the board, the public record, its private experiments and its exact deduction grid to Claude once per phase, as ONE parallel batch for all four seats. game->player frames: {\"type\":\"welcome\",\"protocol\":\"cogchemists.player.v1\",\"slot\":N,\"name\":str,\"rounds\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":str,\"you\":{coin,reputation,score,hand[names],mortar,press,grid[8][candidate signature indexes],chemistries,facts[],notes},\"table\":[4 public seat summaries: seat,name,coin,reputation,score,handCount,mortar,press,published[]],\"seals\":[{ingredient,claim,claimText,author,authorName,round,endorsers[],status,vindications,burnedBy,roundBurned}],\"publicFacts\":[{kind:mixFull|mixSign|notSig,...}],\"round\":int,\"rounds\":int,\"phase\":\"lab\"|\"market\",\"demand\":str,\"legal\":[exact legal action strings],\"heard\":[4 remarks],\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED to exactly what that seat may see: no rival's hand contents, private results, notes, grid or chemistries-left ever crosses this socket, and the chemistry never does; {\"type\":\"final\",\"done\":true,\"scores\":[...],\"reputation\":[...],\"coin\":[...],\"names\":[4 aliases],\"rounds\":int,\"reason\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes, truncated on a rune boundary) is the policy, sent right after connecting and again after welcome; scripted \"assayer\" (or \"1\"/true) plays the built-in competent scientist for that seat, \"quack\" the reckless careerist, \"\" means LLM-driven. The server's reply schema, one object per decision: {\"action\":str (<=24 runes; forage, test_student, test_self, transmute, pass in LAB; sell, publish, endorse, debunk, buy, pass in MARKET), \"a\":str (<=24 runes; a full ingredient name, a unique prefix of >=3 letters, or the index 0-7), \"b\":str (<=24 runes; the second card, or the reagent for debunk), \"signature\":str (<=12 runes; publish only - R+G-B+, +-+ and + - + all parse), \"artifact\":str (<=12 runes; buy only - mortar or press), \"say\":str (<=140 runes, public seminar remark, dropped when talk is false), \"notes\":str (<=600 runes, private, fed back verbatim next phase)}. Every cap truncates on RUNE boundaries. A reply that will not parse is retried once and then replaced by the scripted assayer move. A policy is just a prompt: field one by reusing the published cogchemists-player runnable with PLAYER_PROMPT set to your strategy."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"cogchemists\",\"seats\":[{name,coin,reputation,score,hand[],handCount,mortar,press,published[],endorsed[],say,notes,pending,grid[8][],chemistries,solved,action,result} x4 by seat],\"seals\":[...],\"publicFacts\":[...],\"bench\":{seat,a,b,potion,secret}|null,\"ingredients\":[8 names],\"signatures\":[8 names],\"round\":int,\"rounds\":int,\"roundsPlayed\":int,\"phase\":\"lab\"|\"market\"|\"done\",\"demand\":str,\"demands\":[revealed so far],\"initiative\":[4],\"chemistry\":[empty until the exhibition, then the 8 true signature indexes],\"started\":bool,\"exhibited\":bool,\"gameDone\":bool,\"reason\":str,\"policyNames\":[...],\"events\":[...],\"done\":bool,\"connected\":[bool]}. This is the SPECTATOR view and it does carry private results, so the player socket has its own redacted frame. The events array is append-only and carries the complete transcript. Six event kinds: start{chemistry[8],hands[4][3]} - the truth and the seeded opening hands; round{round,demand,initiative[4],royalties[4],seats[4 public snapshots]}; phase{round,phase}; act{round,phase,seat,action,a,b,signature,artifact,potion,secret,draws[],discarded[],result (ok|hit|miss|poisoned|glowed|burned|survived|rejected:<reason>),coinDelta,repDelta,target,scripted,say,text}; exhibition{round,chemistry[8],verdicts[{ingredient,claim,claimText,author,endorsers[],true}],repDeltas[4]}; end{round=rounds played,text=complete|deadline}. The browser page at /client/global renders the lab table live and /client/replay plays a recorded episode; the STATIC replay viewer bundle renders hosted replays at index.html?replay=<url> and re-derives every frame - including all four deduction grids - from the replay bytes with the same Nim sim the server ran."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Cogchemists is a port of the deduction half of Alchemists for four LLM-piloted cogs. Each episode the server draws a secret bijection from eight ingredients to eight alchemical signatures - triples of signs over RED, GREEN and BLUE, written R+G-B+ - out of the 40,320 possible, fresh from the seed, so nothing carries between episodes. Over six rounds of lab-then-market, seats forage, mix pairs of ingredients (privately on a paid student, or on themselves, where a negative potion poisons them and everyone sees them retch), sell potions to an adventurer who asked for a specific result, PUBLISH wax-sealed theories about single ingredients for immediate reputation and per-round royalties, endorse rivals' seals, and DEBUNK them by public demonstration - which burns a false seal only when the attacker brings a reagent that must expose it, and costs the attacker two reputation when it does not. The exhibition after the last round opens every standing seal against the truth: +5 reputation for a true theory, -6 for a false one. score = reputation + 0.2 x coin, higher is better, and a seat that published three lies finishes below zero. A policy is just a prompt: field one by reusing the published cogchemists-player runnable with the PLAYER_PROMPT environment variable set to your strategy. Two scripted baselines ship in the same image - assayer, the competent scientist who publishes only what it has solved, and quack, the reckless careerist who publishes on a hunch - selected with PLAYER_SCRIPTED, and they also play every seat when no LLM credentials are available, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Cogchemists rules\n\n## The eight ingredients\n\n| # | Ingredient | # | Ingredient |\n|---|---|---|---|\n| 0 | Nightcap | 4 | Copper Fern |\n| 1 | Emberroot | 5 | Gravebloom |\n| 2 | Fen Lily | 6 | Sunmoss |\n| 3 | Widow's Salt | 7 | Rime Thistle |\n\nIngredient identity is never hidden: a card in a hand, on the bench or in a demonstration is always\nnamed. What is hidden is what it *is*.\n\n## Signatures and the hidden chemistry\n\nA **signature** is a triple of signs over RED, GREEN and BLUE, written `R+G-B+` (ASCII\nhyphen-minus). There are exactly 8. The episode's **chemistry** is a **bijection** ingredient ->\nsignature: a seeded permutation, so every signature is used exactly once and two ingredients never\nshare one. 8! = 40,320 chemistries are possible and one is drawn fresh from the episode seed. No\nseat ever sees it; spectators see it only at the exhibition.\n\n## The mixing rule\n\nMixing two ingredient cards `a` and `b` with signatures `sa` and `sb`:\n\n1. Look at the aspects where `sa` and `sb` **disagree**.\n2. If they disagree on **exactly one** aspect, the potion takes that aspect's **colour**, and its\n   **sign** is the **product of the two aspects they agree on**: `+` when those two point the same\n   way, `-` when they point opposite ways. The rule is symmetric, so mix order never matters.\n3. If they disagree on two or three aspects - or on none, i.e. the same ingredient twice, which is\n   legal - the potion is **MUD**.\n\n| `sa` | `sb` | disagree on | agree on | potion |\n|---|---|---|---|---|\n| `R+G+B+` | `R+G+B-` | BLUE | `R+`,`G+` -> `+` | **BLUE+** |\n| `R+G+B+` | `R+G-B+` | GREEN | `R+`,`B+` -> `+` | **GREEN+** |\n| `R+G-B+` | `R-G-B+` | RED | `G-`,`B+` -> `-` | **RED-** |\n| `R+G-B-` | `R-G-B-` | RED | `G-`,`B-` -> `+` | **RED+** |\n| `R+G+B+` | `R-G-B-` | all three | - | **MUD** |\n\nThe whole outcome vocabulary is seven values: `RED+`, `RED-`, `GREEN+`, `GREEN-`, `BLUE+`, `BLUE-`,\n`MUD`. Over the 28 unordered signature pairs each coloured potion is produced by exactly **2** pairs\nand MUD by the other **16**, so a coloured result is a very strong constraint and MUD a weak one.\n\n## Rounds, phases and resolution order\n\nThe episode is `rounds` rounds (default 6, 3..10). Each round has two simultaneous-decision phases,\n**LAB** then **MARKET**. Both take exactly one action per seat and resolve in initiative order\n`order[i] = (i + round) mod 4`, so the lead rotates.\n\n1. **Round open.** The adventurer's demand for this round is drawn from the seed and published (one\n   of the six coloured potions, never MUD). Royalties are paid: every standing seal earns its author\n   +1 coin (+2 with the Printing Press). The initiative order is published.\n2. **LAB opens.** Every seat's deduction grid is recomputed; all four decisions are taken\n   simultaneously.\n3. **LAB resolves** in initiative order, one action at a time.\n4. **MARKET opens.** Grids are recomputed - a seat sees this round's lab consequences before it\n   commits its public move.\n5. **MARKET resolves** in the same order. This is where contention lives: an action that was legal\n   when the phase opened may be **rejected** by an earlier seat in the same phase, is recorded\n   `rejected:<reason>`, and degrades to `pass` (the actor still takes the +1 coin stipend).\n6. Next round, or the exhibition.\n7. **The exhibition.** Every standing seal is opened against the truth: a true theory pays its\n   author **+5 reputation** and each endorser **+2**; a false one costs the author **-6** and each\n   endorser **-3**. Seals already burned by a debunk are not re-scored - they settled at the burn.\n\n## The LAB menu (private science; the cards you burn are public)\n\n| action | cost | effect | who learns what |\n|---|---|---|---|\n| `forage` | 0 | Draw 2 cards (hand cap 6; a draw into a full hand is discarded and recorded). | The drawn cards are public. |\n| `test_student a b` | -1 coin | Consume both cards (only `a` with the Magic Mortar). You learn the potion. | The two ingredients are public; the potion is private to you. |\n| `test_self a b` | 0 | Consume both cards (Mortar: only `a`). You learn the potion and drink it: negative poisons you (-2 reputation), positive is a triumph (+1), MUD does nothing. | The ingredients and the potion's **sign class** are public; the colour stays private. |\n| `transmute a` | 0 | Consume one card, receive +2 coin. | Public. |\n| `pass` | 0 | The academy stipend, +1 coin. | Public. |\n\n## The MARKET menu (public career)\n\n| action | cost | effect |\n|---|---|---|\n| `sell a b` | 0 | Consume both cards and sell the potion to this round's adventurer. Hit: +6 coin, +1 reputation. Miss (MUD included): +2 coin, -1 reputation. The potion is public either way. |\n| `publish a SIG` | -1 coin | Pin a wax seal claiming ingredient `a` has signature `SIG`. Immediate +2 reputation (+3 with the Printing Press). Legal only where no seal stands. Earns royalties from the next round open. |\n| `endorse a` | -1 coin, paid to the author | Co-sign a rival's standing seal (never your own, never twice). At the exhibition +2 if true, -3 if false; -1 if it burns first. |\n| `debunk a b` | -1 coin, consumes card `b` | A public demonstration against the standing seal on `a`. The academy supplies `a`, you supply `b`, and the real potion `p` is revealed publicly. The claim predicts `q`. If `p != q` the seal **BURNS**: author -4, you +3, each endorser -1, and `a` becomes publishable again. If `p == q` the attack **fails**: you -2, the author +1, and the seal stands. |\n| `buy mortar` / `buy press` | -4 / -5 coin | Once each. **Magic Mortar**: your tests consume only the first card. **Printing Press**: publish pays +3 and royalties 2. |\n| `pass` | 0 | +1 coin. |\n\nCoin never goes negative: an action a seat cannot afford is simply not in its legal set, and `pass`\nis always legal.\n\n## What a seat sees\n\nVisible: itself (alias, coin, reputation, score, artifacts, its exact hand, its own notes); the\nround, phase, this round's demand and the initiative order; every rival's alias, coin, reputation,\nscore, artifacts and **hand count**; the whole board of seals with authors, endorsers and status;\nthe public record of every action with its publicly revealed outcome; its own private `mixFull`\nresults; its own deduction grid; and the exact list of `LEGAL MOVES` for this phase.\n\nHidden: the chemistry; any rival's private results (only the sign class leaks, and only from\n`test_self`); any rival's hand contents, notes, grid or chemistries-left; the draw stream ahead;\nfuture demands; and this phase's undelivered actions by other seats.\n\n## The two endings\n\n- `complete` - all rounds resolved and the exhibition held.\n- `deadline` - the episode clock (60% of `episodeTimeoutSeconds`, checked only between phases)\n  stopped play. The exhibition **still runs** on the board as it stands, so a truncated episode\n  never pays unearned publication credit. `results.rounds` reports the rounds actually played.\n"
+          }
+        },
+        {
+          "id": "deduction.md",
+          "title": "deduction.md",
+          "content": {
+            "type": "text",
+            "value": "# Deduction, and who leaks what\n\n## A fact\n\nEvery fact is a hard constraint on the chemistry. There are three kinds:\n\n| fact | meaning | who holds it |\n|---|---|---|\n| `mixFull(a, b, potion)` | mixing `a` and `b` gives exactly this potion | private to the tester; **public** for `sell` and `debunk` results |\n| `mixSign(a, b, class)` | mixing `a` and `b` gives a potion of this class (`positive` / `negative` / `mud`) | **public**, from every `test_self` |\n| `notSig(x, v)` | ingredient `x` is **not** signature `v` | **public**, minted when a seal burns |\n\nSeat `s` knows every public fact, plus its own private `mixFull` facts, plus the standing rule that\nthe chemistry is a bijection.\n\n## The grid\n\nA seat's grid is computed by **exact enumeration of all 40,320 bijections**, keeping those\nconsistent with every fact it knows:\n\n- `grid[x]` is the set of signatures `v` such that some consistent bijection maps `x -> v`;\n- `chemistries` is how many bijections survive.\n\nThere is no heuristic propagation, so the grid never over- or under-claims. An ingredient whose set\nis a **singleton** is **SOLVED** - that is when a seat may publish without gambling. The grid is\nrecomputed once per seat per phase open, and the wasm replay viewer runs the same code, which is why\nspectators can watch all four grids narrow like a hole-cam instead of taking anybody's word for it.\n\nThe prompt receives the grid as a table, not as prose:\n\n```\nYOUR DEDUCTION GRID (12 chemistries still possible)\nNightcap      SOLVED  R+G-B+\nEmberroot     2       R-G+B+ | R-G+B-\nFen Lily      3       R+G+B+ | R+G+B- | R-G-B+\n```\n\n## The information economics\n\n- **forage** leaks the two cards you drew, and nothing else.\n- **test_student** leaks the two ingredients you burned. The potion is yours alone. It costs a coin\n  precisely because the silence is worth paying for.\n- **test_self** leaks the two ingredients *and* the sign class - everybody sees you glow or retch -\n  but the colour stays yours. It is free because you are the one who suffers.\n- **sell** leaks the whole potion. Selling is how you make coin and how you hand the table a fact.\n- **debunk** leaks the whole potion of `x` with `y` to everyone, whether the attack works or not, so\n  every demonstration is a free public experiment paid for by the attacker.\n- **publish** leaks what you claim, which need not be what you know.\n- A **burn** mints `notSig(x, claim)` for everyone: a false seal, once exposed, narrows every seat's\n  grid.\n\nBecause a coloured potion is produced by only 2 of the 28 signature pairs, a coloured result cuts\nthe hypothesis space by roughly fourteen; MUD, produced by 16 of 28, barely moves it. Choosing which\npair to burn a phase on is the whole science: prefer the pair whose worst-case outcome would leave\nthe fewest chemistries standing.\n\n## Attacking well\n\nA false seal burns **only** when the attacker brings a reagent that exposes it. `p == q` happens\noften against a wrong claim whose error this particular pairing cannot see - the attack fails, the\nattacker pays 2 reputation, and the fraud is *strengthened* by a recorded vindication. A safe attack\nis one where every chemistry still consistent with the attacker's own grid predicts a different\npotion from the seal's claim. Attacking well therefore requires knowing more than the author.\n"
+          }
+        },
+        {
+          "id": "scoring.md",
+          "title": "scoring.md",
+          "content": {
+            "type": "text",
+            "value": "# Scoring\n\nEvery seat starts on **reputation 10** and **coin 4**.\n\n```\nscore(seat) = reputation(seat) + 0.2 * coin(seat)\n```\n\n**Higher is better.** Reputation is the point; coin is the tiebreaker at one fifth of a reputation\npoint per coin - enough to make selling and royalties matter, never enough to beat a true\npublication. A score is a float and **may be negative**: a seat that publishes three false theories\nand gets burned lands below zero, and that is intended. The league ranks by **mean episode score**,\nand `results.scores[]` carries exactly this number per seat, attributed by policy name.\n\n## Every reputation move, in one table\n\n| event | author | debunker | endorser | actor |\n|---|---|---|---|---|\n| `publish` | +2 (+3 with the Press) | - | - | - |\n| `sell` hit | - | - | - | +1 |\n| `sell` miss | - | - | - | -1 |\n| drink a positive potion | - | - | - | +1 |\n| drink a negative potion | - | - | - | -2 |\n| successful debunk (seal burns) | -4 | +3 | -1 each | - |\n| failed debunk (seal stands) | +1 | -2 | - | - |\n| exhibition, standing seal TRUE | +5 | - | +2 each | - |\n| exhibition, standing seal FALSE | -6 | - | -3 each | - |\n\nNothing else moves reputation. Coin moves: `pass` +1, `transmute` +2, `sell` +6 (hit) or +2 (miss),\nroyalties +1 per standing seal per round open (+2 with the Press), `test_student` -1, `publish` -1,\n`endorse` -1 (paid to the author, who gains it), `debunk` -1, `buy mortar` -4, `buy press` -5.\n\n## The worked landmark\n\nSprocket runs `test_student` in round 0's lab (coin 4 -> 3), publishes Nightcap in round 0's market\n(coin 3 -> 2, reputation 10 -> 12). Royalties at the opens of rounds 1-5 pay 5 coin (2 -> 7). In\nround 1 it forages, then sells a hit (+6 coin -> 13, reputation -> 13). Rounds 2-5 it passes eight\ntimes (+8 coin -> 21). The exhibition proves Nightcap true (+5 reputation -> 18). Final: reputation\n18, coin 21, **score = 18 + 0.2 x 21 = 22.2**.\n\n## The do-nothing floor\n\nA seat that passes all twelve phases and does nothing else finishes on reputation 10, coin 16,\n**score 13.2** - safe, mediocre, and exactly the number a real policy has to beat. Publishing one\ntrue theory is worth about seven points; publishing one false theory is worth about minus five. That\ngap, eleven points on a single wax seal, is the game.\n"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "cogchemists-player",
+      "name": "Cogchemists Prompt Player",
+      "type": "player",
+      "description": "The reference Cogchemists policy: delivers its PLAYER_PROMPT (or a default alchemy strategy in words) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{COGCHEMISTS_IMAGE}}",
+      "run": [
+        "/bin/cogchemists-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogchemists/tree/main"
+    },
+    {
+      "id": "cogchemists-assayer",
+      "name": "Cogchemists Assayer Baseline",
+      "type": "player",
+      "description": "The scripted competent scientist as a fieldable policy: picks the experiment whose worst case leaves the fewest chemistries standing, publishes only ingredients its grid has SOLVED, and attacks a rival's seal only with a reagent whose demonstration must expose it. The game server plays it deterministically, no LLM involved.",
+      "image": "{{COGCHEMISTS_IMAGE}}",
+      "run": [
+        "/bin/cogchemists-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "assayer"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogchemists/tree/main"
+    },
+    {
+      "id": "cogchemists-quack",
+      "name": "Cogchemists Quack Baseline",
+      "type": "player",
+      "description": "The scripted reckless careerist: drinks whatever is in its hand and publishes the lowest candidate for the lowest unclaimed ingredient the moment it has a coin. Certainty be damned; it reliably finishes last, and it is what the game is a satire of.",
+      "image": "{{COGCHEMISTS_IMAGE}}",
+      "run": [
+        "/bin/cogchemists-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "quack"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-cogchemists/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "The Academy",
+      "description": "Four cogs, eight ingredients, six rounds; seminar remarks allowed and artifacts on sale.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "rounds": 6,
+        "talk": true,
+        "artifacts": true,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "silent-academy",
+      "name": "Silent Academy",
+      "description": "The same academy with no seminar: seats may not speak, so a wax seal and a public demonstration are the only ways to say anything.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "rounds": 6,
+        "talk": false,
+        "artifacts": true,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        }
+      ],
+      "num_agents": 4,
+      "seed": 11,
+      "rounds": 4,
+      "turnDelayMs": 0,
+      "minBatchSpacingMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "cogchemists-player"
+      },
+      {
+        "player_id": "cogchemists-assayer"
+      },
+      {
+        "player_id": "cogchemists-player"
+      },
+      {
+        "player_id": "cogchemists-quack"
+      }
+    ]
+  }
+}

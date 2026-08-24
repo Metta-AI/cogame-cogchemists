@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cogchemists — Replay</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">COG<span>CHEMISTS</span></div>
+      <div id="clock">ROUND 0</div>
+      <div id="topright">
+        <span id="statuschip">replay</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="labbar"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    <div id="transport">
+      <div class="scrub" id="scrub"></div>
+      <div class="tbar">
+        <button class="tbtn" id="play">❚❚</button>
+        <span class="tpos" id="pos">0 / 0</span>
+      </div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<div id="loading">LOADING REPLAY…</div>
+<script src="/client/renderer.js"></script>
+<script>
+  // Cogchemists additions to the inherited cogame-bullwhip chrome. The page
+  // above is the starter's, element for element and id for id; the only
+  // additions are #labbar and this bootstrap's relayout()/buildLabBar().
+  // Both are named so they cannot shadow anything renderer.js defines.
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  function buildLabBar() {
+    return document.getElementById("labbar");
+  }
+  function relayout() {
+    // --band and --hudscale live on :root so every rule (and the endcard's
+    // bottom edge) can see them; fit() runs from the same function so the
+    // canvas and the custom properties can never disagree.
+    var transport = document.getElementById("transport");
+    var band = transport ? transport.offsetHeight : 0;
+    var root = document.documentElement;
+    root.style.setProperty("--band", band + "px");
+    root.style.setProperty("--hudscale",
+      String(Math.max(0.8, Math.min(1.15, window.innerWidth / 960))));
+    fit();
+  }
+  window.addEventListener("resize", relayout);
+  window.addEventListener("load", relayout);
+  relayout();
+  CogchemistsRenderer.bindFeedToggle(document.getElementById("feedtoggle"),
+    true);
+  var wsScheme = location.protocol === "https:" ? "wss://" : "ws://";
+  var replaySocket = new WebSocket(wsScheme + location.host + "/replay");
+  replaySocket.onmessage = function (frame) {
+    var payload = JSON.parse(frame.data);
+    if (payload.type !== "replay") return;
+    document.getElementById("loading").style.display = "none";
+    relayout();
+    CogchemistsRenderer.attachReplay({
+      canvas: canvas,
+      feed: document.getElementById("feed"),
+      scrub: document.getElementById("scrub"),
+      playButton: document.getElementById("play"),
+      label: document.getElementById("pos"),
+      clock: document.getElementById("clock"),
+      scorebug: document.getElementById("scorebug"),
+      labbar: buildLabBar(),
+      endscreen: document.getElementById("endscreen"),
+      assetBase: "/client/assets",
+      payload: payload
+    });
+    replaySocket.onmessage = null;
+  };
+  replaySocket.onerror = function () {
+    document.getElementById("loading").textContent = "REPLAY FAILED TO LOAD";
+  };
+</script>
+</body>
+</html>
