@@ -309,11 +309,18 @@ jobs:
           # playback catches it (cogball 0.1.4, 2026-08-23). The 47-event
           # certification-fixture replay is ~45 s of playback, so a 15 s soak
           # cannot false-negative on a finished replay.
+          # --strict-text-bounds: the lab is a FIXED arena, so nothing the
+          # renderer draws belongs outside the canvas. It was drawing plenty --
+          # every speech bubble grew upward from the top of its cog, which sits
+          # at the top of the arena, so each bubble body landed at a negative y
+          # and four sentences rendered as four white slivers (2026-08-24).
+          # Nothing errored; only measuring the draws can see it.
           node tools/ci/viewer_smoke.mjs \
             --bundle dist/static-replay-viewer \
             --replay "${replay}" \
             --timeout 90 \
-            --soak 15
+            --soak 15 \
+            --strict-text-bounds
 
       - name: Upload the viewer smoke evidence
         # Always: the screenshot and the JSON are most useful when the job is red.

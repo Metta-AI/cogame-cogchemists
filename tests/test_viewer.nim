@@ -160,6 +160,37 @@ suite "chrome provenance":
     check "data-replay-loaded" in shell
     check "data-replay-loaded" in readRepoFile("client/renderer.js")
 
+  test "the speech bubble is given a band, sized from the server's own cap":
+    ## A canvas takes a draw at a negative y without complaining. Bubbles used
+    ## to grow UPWARD from the top of the cog, and the cog sits at the top of
+    ## the arena, so every body landed off the top of the canvas and four
+    ## sentences rendered as four white slivers (2026-08-24). The fix reserves
+    ## a band above the cog row and sizes it from a full-length remark; these
+    ## checks pin the parts of that which can drift apart.
+    let js = readRepoFile("client/renderer.js")
+    ## The band exists, and the cog row starts below it rather than at the top
+    ## of the main area.
+    check "bubble.band" in js
+    check "stationTop: mainY" in js
+    check "var top = L.stationTop;" in js
+    ## The renderer's idea of how long a remark can be must be the SERVER's.
+    var cap = ""
+    for line in readRepoFile("src/cogchemists/sim.nim").splitLines():
+      let trimmed = line.strip()
+      if trimmed.startsWith("MaxSayLen* = "):
+        cap = trimmed["MaxSayLen* = ".len .. ^1].strip()
+    check cap.len > 0
+    check ("var MAX_SAY_LEN = " & cap & ";") in js
+    ## The band is measured in the font the bubble is drawn in, not guessed:
+    ## one helper supplies that font to both the layout and the draw.
+    check js.count("ctx.font = bubbleFont(scale);") == 2
+    ## A bubble is at most one column wide, so neighbouring seats' bubbles
+    ## cannot overlap and the outer two cannot spill off the lab table.
+    check "maxW: Math.max(72, pitch - 8 * scale)" in js
+    ## CI measures what the viewer actually drew; without the flag the count
+    ## is only logged.
+    check "--strict-text-bounds" in readRepoFile(".github/workflows/ci.yml")
+
   test "the replay viewer is a static bundle, never a pod":
     let manifest = readRepoFile("coworld_manifest_template.json")
     check "\"replay_viewer\": {" in manifest

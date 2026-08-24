@@ -57,6 +57,16 @@
   var SLIDE_MS = 600;
   var BUBBLE_MS = 1100;
   var BUBBLE_HOLD_MS = 6000;
+  // A remark is capped server-side at MaxSayLen runes (sim.nim). The band
+  // above the cog row is sized to hold one in full; BUBBLE_LINES_CAP only
+  // stops a pathologically narrow column from demanding the whole arena.
+  var MAX_SAY_LEN = 140;
+  var BUBBLE_LINES_CAP = 8;
+  // Word wrap leaves a ragged right edge, so a measured character budget
+  // under-counts the lines actually needed by roughly this much.
+  var BUBBLE_RAGGED = 1.12;
+  var BUBBLE_FONT_SAMPLE =
+    "the pairing has to be carrying the red aspect and I am publishing it";
   var NARROW = 640;
 
   function assetUrl(base, name) {
@@ -137,11 +147,18 @@
 
   // ---- Layout --------------------------------------------------------------
 
+  // The bubble font, shared: the layout measures the band in it and
+  // drawBubble draws in it, so the two can never drift apart.
+  function bubbleFont(scale) {
+    return Math.round(10 * scale) +
+      "px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+  }
+
   // A FIXED arena: everything is always inside the frame, so there is no
   // zoom bar and no minimap. Four stations across the top, the bench under
   // them, the theory board down the right, the hole-cam strip along the
   // bottom.
-  function computeLayout(width, height) {
+  function computeLayout(ctx, width, height) {
     var margin = 8;
     var narrow = width < NARROW;
     var boardW = Math.max(112, Math.min(width * 0.26, 280));
@@ -152,15 +169,59 @@
     var mainH = height - stripH - margin * 3;
     var scale = Math.max(0.55, Math.min(1.5, Math.min(mainW / 640,
       mainH / 380)));
-    var stationH = Math.max(96, mainH * (narrow ? 0.52 : 0.58));
     var pitch = mainW / 4;
     var columns = [];
     for (var c = 0; c < 4; c++) {
       columns.push({ x: mainX + pitch * (c + 0.5) });
     }
+    var cogSize = Math.max(26, Math.min(64 * scale, pitch * 0.42));
+
+    // A remark runs up to MaxSayLen (140) runes, so the bubble needs a band of
+    // its OWN above the cog row. Without one it was drawn at a negative y and
+    // clipped off the top of the canvas. The band is reserved whether or not
+    // anyone is speaking, so stations never jump when a remark lands, and it
+    // is one column wide minus a hair, so neighbouring bubbles cannot overlap
+    // and the outer two cannot spill past the lab table.
+    var bubble = {
+      lineH: 12 * scale,
+      pad: 6 * scale,
+      tail: 6 * scale,
+      gap: 6 * scale,
+      maxW: Math.max(72, pitch - 8 * scale)
+    };
+    // Fixed cost of a bubble regardless of how many lines it holds.
+    var bubbleFixed = bubble.pad * 2 + bubble.tail + bubble.gap;
+    // The station block below the band: the 6*scale inset, then cog, name,
+    // reputation, coin, artifact badges, and the first row of the hand — the
+    // tallest case, with badges. Keep in step with drawStation.
+    var stationBlockH = cogSize * 1.22 + 106 * scale;
+    // How many lines a full-length remark needs at this column width —
+    // MEASURED in the bubble's own font rather than guessed, so the band is
+    // never short (clipped text) and never hogs room it will not use. The
+    // station band then grows to fit rather than eating into the cog block;
+    // only a very short arena gets fewer lines, and then the tail ellipsizes.
+    ctx.save();
+    ctx.font = bubbleFont(scale);
+    var charW = ctx.measureText(BUBBLE_FONT_SAMPLE).width /
+      BUBBLE_FONT_SAMPLE.length;
+    ctx.restore();
+    var wantLines = Math.max(1, Math.ceil(
+      MAX_SAY_LEN * charW * BUBBLE_RAGGED /
+        Math.max(1, bubble.maxW - bubble.pad * 2)));
+    var stationCap = mainH * 0.74;
+    bubble.maxLines = Math.max(1,
+      Math.min(wantLines, BUBBLE_LINES_CAP,
+        Math.floor((stationCap - stationBlockH - bubbleFixed) / bubble.lineH)));
+    bubble.band = bubble.maxLines * bubble.lineH + bubbleFixed;
+    var stationH = Math.min(stationCap,
+      Math.max(Math.max(96, mainH * (narrow ? 0.52 : 0.58)),
+        stationBlockH + bubble.band));
+
     return {
       width: width, height: height, margin: margin, narrow: narrow,
       scale: scale, pitch: pitch, columns: columns,
+      cogSize: cogSize, bubble: bubble,
+      stationTop: mainY + 6 * scale + bubble.band,
       main: { x: mainX, y: mainY, w: mainW, h: mainH },
       stationH: stationH,
       bench: { x: mainX, y: mainY + stationH, w: mainW,
@@ -179,7 +240,7 @@
     if (!w || !h) return;
     var seats = view.seats || [];
     var now = view.now || Date.now();
-    var L = computeLayout(w, h);
+    var L = computeLayout(ctx, w, h);
     var fx = view.effects || {};
 
     var floor = images["arena_floor.png"];
@@ -220,8 +281,8 @@
   function drawStation(ctx, images, L, view, index, seat, opts) {
     var col = L.columns[index];
     var x = col.x;
-    var top = L.main.y + 6 * L.scale;
-    var size = Math.max(26, Math.min(64 * L.scale, L.pitch * 0.42));
+    var top = L.stationTop;
+    var size = L.cogSize;
     var color = seatColor(index);
     var sprite = images["soldier_" + color + "_front.png"];
     var cogY = top + size * 0.6;
@@ -309,8 +370,8 @@
         BUBBLE_HOLD_MS;
       var alpha = sayAge < BUBBLE_HOLD_MS ? 1 :
         Math.max(0.4, 1 - (sayAge - BUBBLE_HOLD_MS) / 4000);
-      drawBubble(ctx, x, cogY - size * 0.6, opts.say, L.pitch * 1.2,
-        L.scale, alpha);
+      drawBubble(ctx, x, cogY - size * 0.6 - L.bubble.gap, opts.say, L,
+        alpha);
     }
   }
 
@@ -827,8 +888,29 @@
     ctx.restore();
   }
 
+  // A word wider than the line gets hard-broken rather than ellipsized, so a
+  // long ingredient run or a pasted signature string loses nothing.
+  function breakWord(ctx, word, maxWidth) {
+    var parts = [];
+    var head = "";
+    for (var i = 0; i < word.length; i++) {
+      if (head && ctx.measureText(head + word[i]).width > maxWidth) {
+        parts.push(head);
+        head = "";
+      }
+      head += word[i];
+    }
+    if (head) parts.push(head);
+    return parts;
+  }
+
   function wrapLines(ctx, text, maxWidth, maxLines) {
-    var words = text.split(/\s+/);
+    var words = [];
+    String(text).split(/\s+/).forEach(function (word) {
+      if (!word) return;
+      if (ctx.measureText(word).width <= maxWidth) words.push(word);
+      else words = words.concat(breakWord(ctx, word, maxWidth));
+    });
     var lines = [];
     var line = "";
     words.forEach(function (word) {
@@ -850,19 +932,23 @@
     return lines.map(function (l) { return ellipsize(ctx, l, maxWidth); });
   }
 
-  function drawBubble(ctx, x, bottom, text, maxW, scale, alpha) {
+  // Bubbles hang off the BOTTOM edge given: `bottom` is where the tail's tip
+  // lands, and the body grows upward into the band the layout reserved for it
+  // (L.bubble.band), so a long remark never runs off the top of the canvas.
+  function drawBubble(ctx, x, bottom, text, L, alpha) {
+    var scale = L.scale;
+    var B = L.bubble;
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = Math.round(10 * scale) +
-      "px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
-    var pad = 6 * scale;
-    var lineH = 12 * scale;
-    var lines = wrapLines(ctx, text, maxW - pad * 2, 3);
+    ctx.font = bubbleFont(scale);
+    var pad = B.pad;
+    var lineH = B.lineH;
+    var lines = wrapLines(ctx, text, B.maxW - pad * 2, B.maxLines);
     var bw = 0;
     lines.forEach(function (l) { bw = Math.max(bw, ctx.measureText(l).width); });
     bw += pad * 2;
     var bh = lines.length * lineH + pad * 2 - 2;
-    var y = bottom - bh - 6 * scale;
+    var y = bottom - bh - B.tail;
     ctx.shadowColor = "rgba(0,0,0,0.6)";
     ctx.shadowBlur = 5;
     ctx.fillStyle = PAPER;
@@ -871,7 +957,7 @@
     ctx.shadowColor = "transparent";
     ctx.beginPath();
     ctx.moveTo(x - 5 * scale, y + bh);
-    ctx.lineTo(x, y + bh + 6 * scale);
+    ctx.lineTo(x, y + bh + B.tail);
     ctx.lineTo(x + 5 * scale, y + bh);
     ctx.closePath();
     ctx.fill();
