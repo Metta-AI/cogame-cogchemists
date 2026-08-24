@@ -280,9 +280,16 @@ proc largestBucket*(sample: seq[Chemistry], a, b: int): int =
     if buckets[potion] > result:
       result = buckets[potion]
 
+proc truncated*(sample: seq[Chemistry]): bool =
+  ## consistentSample stops at the cap, so a sample sitting on it may be a
+  ## PREFIX of the surviving set: nothing can be guaranteed over it. The
+  ## guarantee predicates below answer conservatively when it is.
+  sample.len >= BotSampleCap
+
 proc certainPotion*(sample: seq[Chemistry], a, b: int): Potion =
-  ## The potion `a`+`b` must produce, or poNone when the sample disagrees.
-  if sample.len == 0:
+  ## The potion `a`+`b` must produce, or poNone when the sample disagrees
+  ## or is too big to have been enumerated in full.
+  if sample.len == 0 or sample.truncated:
     return poNone
   result = mixSignatures(sample[0][a], sample[0][b])
   for index in 1 ..< sample.len:
@@ -290,6 +297,10 @@ proc certainPotion*(sample: seq[Chemistry], a, b: int): Potion =
       return poNone
 
 proc canBeNegative*(sample: seq[Chemistry], a, b: int): bool =
+  ## True unless every surviving hypothesis says otherwise: a truncated
+  ## sample cannot rule a poisoning out, so it answers true.
+  if sample.truncated:
+    return true
   for chem in sample:
     if signClassOf(mixSignatures(chem[a], chem[b])) == scNegative:
       return true
@@ -298,8 +309,9 @@ proc canBeNegative*(sample: seq[Chemistry], a, b: int): bool =
 proc alwaysExposes*(sample: seq[Chemistry], x, claim, y: int): bool =
   ## True when demonstrating `x` against reagent `y` must contradict the
   ## claim: for every hypothesis still standing, the real potion differs
-  ## from the one the claim predicts.
-  if sample.len == 0:
+  ## from the one the claim predicts. A truncated sample is not "every
+  ## hypothesis still standing", so it cannot certify the attack.
+  if sample.len == 0 or sample.truncated:
     return false
   for chem in sample:
     if mixSignatures(chem[x], chem[y]) == mixSignatures(claim, chem[y]):

@@ -189,6 +189,63 @@ suite "facts constrain the truth":
           sim.applyAct(seat, probeAction(sim, seat), true)
         sim.drive()
 
+suite "the baselines' guarantees":
+  test "a truncated sample certifies nothing, a full one matches brute force":
+    ## The scripted baselines reason over a BOUNDED sample of the surviving
+    ## bijections. A sample sitting on the cap is only a prefix of that set,
+    ## so the note's "guaranteed" clauses — a debunk that must expose, a
+    ## sell that must hit, a drink that cannot poison — must not be claimed
+    ## over it.
+    let wide = consistentSample(@[])
+    check wide.len == BotSampleCap
+    check wide.truncated
+    check certainPotion(wide, 0, 1) == poNone
+    check canBeNegative(wide, 0, 1)
+    for claim in 0 ..< Signatures:
+      check not alwaysExposes(wide, 0, claim, 1)
+
+    ## A fact set narrow enough to enumerate in full: every guarantee is now
+    ## exactly the one an independent enumeration gives.
+    var rng = initRand(4242)
+    let truth = drawChemistry(rng)
+    var facts: seq[Fact]
+    for a in 0 ..< Ingredients - 1:
+      facts.add(mixFullFact(a, a + 1, mixSignatures(truth[a], truth[a + 1])))
+    let sample = consistentSample(facts)
+    check sample.len > 0
+    check not sample.truncated
+    ## Lexicographic permutations, no sampling and no shared early exit.
+    var survivors: seq[Chemistry]
+    var order = @[0, 1, 2, 3, 4, 5, 6, 7]
+    while true:
+      var chem: Chemistry
+      for index in 0 ..< Ingredients:
+        chem[index] = order[index]
+      if chem.consistent(facts):
+        survivors.add(chem)
+      if not nextPermutation(order):
+        break
+    check sample.len == survivors.len
+    for a in 0 ..< Ingredients:
+      for b in a + 1 ..< Ingredients:
+        var certain = mixSignatures(survivors[0][a], survivors[0][b])
+        var negative = false
+        for chem in survivors:
+          let potion = mixSignatures(chem[a], chem[b])
+          if potion != certain:
+            certain = poNone
+          if signClassOf(potion) == scNegative:
+            negative = true
+        check certainPotion(sample, a, b) == certain
+        check canBeNegative(sample, a, b) == negative
+        for claim in 0 ..< Signatures:
+          var exposes = true
+          for chem in survivors:
+            if mixSignatures(chem[a], chem[b]) ==
+                mixSignatures(claim, chem[b]):
+              exposes = false
+          check alwaysExposes(sample, a, claim, b) == exposes
+
 suite "solver performance":
   test "a 40-fact grid solve fits the wasm frame budget":
     var rng = initRand(7)
