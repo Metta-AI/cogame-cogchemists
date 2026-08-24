@@ -285,3 +285,17 @@ suite "reply parsing":
     check node["action"].getStr() == "pass"
     expect CogchemistsError:
       discard extractJsonObject("I am afraid I cannot do that.")
+
+  test "error text quoted into the log is cut on a rune boundary":
+    ## The reply itself never reaches the replay, but it does reach stdout,
+    ## and a byte cut through a multi-byte character leaves invalid UTF-8
+    ## there (design note, Reply schema: the rune rule applies "to any error
+    ## text quoted into the log").
+    var caught = ""
+    try:
+      discard extractJsonObject("é".repeat(400))
+    except CogchemistsError as error:
+      caught = error.msg
+    check caught.len > 0
+    check caught.validateUtf8() == -1
+    check caught.runeLen < 400

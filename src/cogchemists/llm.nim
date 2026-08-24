@@ -653,11 +653,10 @@ proc extractJsonObject*(text: string): JsonNode =
   let start = text.find('{')
   let stop = text.rfind('}')
   if start < 0 or stop <= start:
-    var head = text.strip()
-    if head.len > 160:
-      head = head[0 ..< 160] & "..."
+    ## Quoted into the log, so it is cut on a RUNE boundary like every
+    ## other captured string: a byte cut can leave invalid UTF-8 on stdout.
     raise newException(CogchemistsError, "no JSON object in response: " &
-      head.replace("\n", " "))
+      cleanText(text, 160).replace("\n", " "))
   parseJson(text[start .. stop])
 
 proc requestFor(client: LlmClient, system, user: string):
@@ -694,7 +693,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
   if error.len > 0:
     raise newException(CogchemistsError, "llm transport: " & error)
   if response.code == 401 or response.code == 403:
-    let detail = response.body[0 .. min(response.body.high, 400)]
+    let detail = cleanText(response.body, 400)
     if "Model access is denied" in response.body and
         client.tryNextBedrockModel("no model access"):
       raise newException(CogchemistsError,
@@ -703,12 +702,12 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
     raise newException(CogchemistsError,
       "llm auth failed (" & $response.code & ") at " & url & ": " & detail)
   if response.code == 429:
-    let detail = response.body[0 .. min(response.body.high, 300)]
+    let detail = cleanText(response.body, 300)
     discard client.tryNextBedrockModel("throttled")
     raise newException(CogchemistsError, "llm throttled (429): " & detail)
   if response.code < 200 or response.code >= 300:
     raise newException(CogchemistsError, "anthropic error " & $response.code &
-      ": " & response.body[0 .. min(response.body.high, 300)])
+      ": " & cleanText(response.body, 300))
   let payload = parseJson(response.body)
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(CogchemistsError, "anthropic refusal")
@@ -717,8 +716,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
       result.add(contentBlock{"text"}.getStr())
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(CogchemistsError, "reply cut off at max_tokens " &
-      "before any JSON: " & result[0 .. min(result.high, 160)]
-        .replace("\n", " "))
+      "before any JSON: " & cleanText(result, 160).replace("\n", " "))
 
 proc awaitBatchSlot(client: LlmClient) =
   ## The hosted Bedrock sidecar caps 30 requests per minute per episode and
