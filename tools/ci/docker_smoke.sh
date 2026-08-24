@@ -309,6 +309,11 @@ for key in ("names", "scores"):
 reason = results.get("reason") or results.get("end_reason")
 if reason is not None:
     print(f"episode end reason: {reason}")
+# The smoke episode has no credentials, so every seat plays the scripted
+# assayer and the episode MUST reach the exhibition on its own clock. A
+# "deadline" here means the offline path stopped advancing.
+if reason != "complete":
+    raise SystemExit(f"results.reason is {reason!r}, expected 'complete'")
 
 replay_path = work / "replay.json"
 if not replay_path.exists() or replay_path.stat().st_size == 0:
