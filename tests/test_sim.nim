@@ -626,19 +626,54 @@ suite "the observation split":
 suite "replay":
   test "the timeline re-derives frame for frame":
     let config = fixtureConfig(rounds = 4, seed = 25)
-    var sim = opened(config)
+    var sim = initSim(config)
+    ## live[k] = the four grids after the k-th recorded event. Every step
+    ## below emits exactly one event, so the re-derived frames can be
+    ## compared frame by frame rather than only at the end.
+    var live: seq[array[Seats, Grid]] = @[sim.grids]
+    proc record(sim: Sim, live: var seq[array[Seats, Grid]]) =
+      doAssert live.len == sim.events.len,
+        "a step emitted more than one event"
+      live.add(sim.grids)
+    record(sim, live)
     while not sim.done:
+      while (not sim.done) and sim.needsAdvance():
+        sim.advance()
+        record(sim, live)
+      if sim.done:
+        break
       for seat in initiativeOrder(sim.round):
-        var act = newAction("pass")
-        if sim.phase == phLab:
-          act = newAction("forage")
+        ## Facts, not just passes: a test_self mints a public mixSign AND a
+        ## private mixFull, so the four grids diverge and an equality that
+        ## only held while every grid was wide open would fail.
+        let hand = sim.seats[seat].hand
+        var act = newAction("forage")
+        if hand.len >= 2:
+          act =
+            if sim.phase == phLab: newAction("test_self", hand[0], hand[1])
+            else: newAction("sell", hand[0], hand[1])
+        if sim.checkAct(seat, act).len != 0:
+          act = newAction("pass")
         act.notes = "n" & $seat
         act.say = "s" & $seat
         sim.applyAct(seat, act, true)
-      sim.drive()
+        record(sim, live)
     let frames = replayMatch(config, sim.events)
     check frames.len == sim.events.len + 1
     check $frames[^1].tableStateJson() == $sim.tableStateJson()
+    ## All four grids in EVERY re-derived frame equal the live ones.
+    var narrowed = 0
+    for index in 1 ..< frames.len:
+      for seat in 0 ..< Seats:
+        check frames[index].grids[seat].chemistries ==
+          live[index][seat].chemistries
+        check frames[index].grids[seat].candidates ==
+          live[index][seat].candidates
+      if frames[index].grids[0].chemistries < TotalChemistries:
+        inc narrowed
+    ## …and the comparison is not vacuous: the grids really did move.
+    check narrowed > 0
+    check sim.grids[0].chemistries < TotalChemistries
     for seat in 0 ..< Seats:
       check frames[^1].grids[seat].chemistries ==
         sim.grids[seat].chemistries
