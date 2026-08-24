@@ -574,6 +574,27 @@ suite "the observation split":
           if card(sim.grids[seat].candidates[ingredient]) > 1:
             check (IngredientNames[ingredient].alignLeft(14) & "SOLVED") notin
               prompt
+        ## And no signature of the true chemistry that the seat's own facts
+        ## do not already imply: the grid it is shown IS the exact solve
+        ## over the facts it holds, so an ingredient is pinned to one
+        ## signature in the frame and in the prompt exactly when its own
+        ## facts pin it — never because the truth leaked in.
+        let ownSolve = solveGrid(sim.knownFacts(seat))
+        for ingredient in 0 ..< Ingredients:
+          check frame["you"]["grid"][ingredient].len ==
+            card(ownSolve.candidates[ingredient])
+          check sim.grids[seat].candidates[ingredient] ==
+            ownSolve.candidates[ingredient]
+          ## The truth is always still standing among them (test 4's
+          ## direction), and when the facts do not single it out neither
+          ## does the line the seat reads.
+          check uint8(sim.chemistry[ingredient]) in
+            ownSolve.candidates[ingredient]
+          if not ownSolve.solved(ingredient):
+            check frame["you"]["grid"][ingredient].len > 1
+            check (IngredientNames[ingredient].alignLeft(14) &
+              "1".alignLeft(8) & sigName(sim.chemistry[ingredient])) notin
+              prompt
         ## LEGAL MOVES names every referent the reply schema can use.
         var joined = ""
         for move in sim.legalMoves(seat):
