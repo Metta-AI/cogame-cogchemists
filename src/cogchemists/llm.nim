@@ -434,7 +434,8 @@ In MARKET you take exactly one of:
 - publish a SIG: -1 coin. Pin a wax seal claiming that ingredient has that
   signature. Immediate +2 reputation (+3 with the Printing Press) — credit
   is paid for the claim, not for being right. Legal only where no seal
-  stands. Standing seals earn their author +1 coin every round open.
+  stands. Standing seals earn their author +1 coin every round open (+2
+  with the Printing Press).
 - endorse a: -1 coin, paid to the author. Co-sign a rival's standing seal.
   At the exhibition you take +2 if it was true, -3 if it was false; -1 if
   it burns first.
@@ -445,7 +446,9 @@ In MARKET you take exactly one of:
   becomes publishable again. If it matches, your attack FAILS: you -2, the
   author +1, and the seal stands stronger. Attacking needs a reagent that
   must expose the lie.
-- buy mortar (-4 coin) or buy press (-5 coin), once each.
+- buy mortar (-4 coin) or buy press (-5 coin), once each. The Magic
+  Mortar spares the second card of every test; the Printing Press pays +3
+  instead of +2 for a publish AND doubles your royalties to 2 coin a round.
 - pass: +1 coin.
 
 THE EXHIBITION, after the last round: every still-standing seal is opened
