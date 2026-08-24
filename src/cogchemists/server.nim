@@ -302,7 +302,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, one parallel batch for the whole phase)
       ## runs outside the lock on a snapshot; only this thread mutates the
       ## sim, so the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      var fromScript: seq[bool]
+      let decisions = client.decideAll(simCopy, seats, prompts, scripted,
+        fromScript)
 
       withLock stateLock:
         for seat in order:
@@ -313,7 +315,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if position < 0:
             continue
           let decision = decisions[position]
-          let wasScripted = scripted[seat] != skNone or client.disabled
+          ## decideAll reports the fallback per seat, so a reply that failed
+          ## twice and took the scripted move is recorded scripted: true —
+          ## the same as a configured scripted seat or a disabled client.
+          let wasScripted = fromScript[position]
           try:
             state.sim.applyAct(seat, decision, wasScripted)
             echo "cogchemists: ", state.sim.names[seat], " plays ",

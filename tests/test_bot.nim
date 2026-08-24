@@ -4,7 +4,7 @@
 ## also actually be worth beating, and the reply parser must read every shape
 ## the schema documents.
 
-import std/[json, monotimes, strutils, times, unicode, unittest]
+import std/[json, monotimes, os, strutils, times, unicode, unittest]
 import cogchemists/[llm, sim]
 
 const
@@ -146,20 +146,61 @@ suite "the no-credentials fallback":
     while not sim.done:
       let seats = sim.pendingSeats()
       check seats.len == Seats
+      var fromScript: seq[bool]
       let decisions = client.decideAll(sim, seats,
-        newSeq[string](Seats), newSeq[ScriptKind](Seats))
+        newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript)
       check decisions.len == Seats
+      ## Every one of those actions came from the baseline, and decideAll
+      ## says so per seat, so the recorded event cannot claim otherwise.
+      check fromScript == @[true, true, true, true]
       for seat in initiativeOrder(sim.round):
         var position = -1
         for index, candidate in seats:
           if candidate == seat:
             position = index
-        sim.applyAct(seat, decisions[position], true)
+        sim.applyAct(seat, decisions[position], fromScript[position])
       sim.drive()
     let elapsed = (getMonoTime() - started).inMilliseconds
     echo "  disabled 6-round episode: ", elapsed, " ms"
     check sim.reason == "complete"
     check elapsed < DisabledBudgetMs
+    ## The recording half: every act in the log is marked scripted.
+    for event in sim.events:
+      if event.kind == evAct:
+        check event.scripted
+
+  test "a seat whose reply fails twice is recorded as scripted":
+    ## The live-credentials path: the client is NOT disabled and no seat is
+    ## configured scripted, so every seat goes out on the wire. The endpoint
+    ## refuses the connection, both attempts fail, and each seat takes the
+    ## assayer move — which decideAll must report as a fallback so phase 60
+    ## can tell a real decision from a scripted one.
+    putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:1")
+    putEnv("AWS_BEARER_TOKEN_BEDROCK", "not-a-real-token")
+    var config = fixture(4)
+    config.llmTimeoutSeconds = 2
+    let client = newLlmClient(config)
+    delEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+    delEnv("AWS_BEARER_TOKEN_BEDROCK")
+    check not client.disabled
+    var sim = initSim(config)
+    sim.drive()
+    let seats = sim.pendingSeats()
+    var fromScript: seq[bool]
+    let decisions = client.decideAll(sim, seats,
+      newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript)
+    check decisions.len == Seats
+    check fromScript == @[true, true, true, true]
+    for seat in initiativeOrder(sim.round):
+      var position = -1
+      for index, candidate in seats:
+        if candidate == seat:
+          position = index
+      check showAct(decisions[position]) in sim.legalMoves(seat)
+      sim.applyAct(seat, decisions[position], fromScript[position])
+    for event in sim.events:
+      if event.kind == evAct:
+        check event.scripted
 
 suite "reply parsing":
   test "the documented shapes parse and the caps hold":

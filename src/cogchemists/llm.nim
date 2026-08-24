@@ -736,18 +736,27 @@ proc decideAll*(
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  fromScript: var seq[bool]
 ): seq[Action] =
   ## One decision per seat in `seats`, in order, as ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
   ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
+  ##
+  ## `fromScript` is indexed like the result (by POSITION in `seats`) and is
+  ## true wherever the returned action came from the baseline rather than a
+  ## model reply: a configured scripted seat, a disabled client, AND a seat
+  ## that fell back after its retry. The caller records exactly this flag,
+  ## so a fallback is never recorded as a real decision.
   result = newSeq[Action](seats.len)
+  fromScript = newSeq[bool](seats.len)
   var open: seq[int]     ## indexes into `seats` still undecided
   for index, seat in seats:
     let kind = scripted[seat]
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skAssayer else: kind))
+      fromScript[index] = true
     else:
       open.add(index)
   for attempt in 0 .. 1:
@@ -786,3 +795,4 @@ proc decideAll*(
     let seat = seats[index]
     echo "cogchemists llm: seat ", seat, " falling back to scripted decision"
     result[index] = scriptedAction(sim, seat, skAssayer)
+    fromScript[index] = true
