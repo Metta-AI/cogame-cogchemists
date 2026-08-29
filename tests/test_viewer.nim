@@ -141,6 +141,24 @@ suite "chrome provenance":
       for name in names:
         check name notin chrome
 
+  test "playback: Space pauses, and the speed chips are styled where the pin allows":
+    ## Both replay surfaces are driven by the one attachReplay, so pinning it
+    ## here covers the static wasm bundle and the server-served page at once.
+    let js = readRepoFile("client/renderer.js")
+    check "function togglePlay()" in js
+    check "evt.code !== \"Space\"" in js
+    ## Never while the viewer is typing, and never scrolling the page.
+    check "t.isContentEditable" in js
+    check "evt.preventDefault();" in js
+    ## The chips divide the per-event dwell rather than replacing it.
+    check "[0.5, 1, 2].forEach" in js
+    check "stepMs / speed" in js
+    ## Their CSS must sit in the APPENDED block: everything above the banner
+    ## is the starter's bytes and its SHA-1 is pinned by the first test here.
+    let appended = appendedBlock(readRepoFile("client/chrome.css"))
+    check ".tspeed" in appended
+    check ".tchip.on" in appended
+
   test "the viewer shell and the wasm module are a matched pair":
     let config = readRepoFile("replay-viewer/config.nims")
     let shell = readRepoFile("replay-viewer/static_replay.js")
