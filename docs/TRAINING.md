@@ -35,3 +35,24 @@ All 960 examples fit 4,096 tokens with the local WordLevel smoke tokenizer.
 One CPU optimizer step reduced four-example validation loss from 1.72949 to
 1.72419 for standard and from 1.73312 to 1.72767 for silent academy. This
 verifies the post-training path.
+
+## Numeric reinforcement learning
+
+`tools/train_bridge.nim` exposes the hosted prompts and 131 numeric values
+from each seat's permitted observation. Three actions select the published
+`assayer` or `quack` policy, or pass. All four seats decide against the same
+phase state before the native simulator resolves them in initiative order.
+Scores remain the game's reputation plus coin value. Utilities use
+`score / (abs(score) + 20)` to fit the RL contract's [-1, 1] range while
+preserving each seat's score ordering. Arbitrary ingredient and theory
+replies use the post-training path above.
+
+```sh
+nim c -d:release --path:src -o:/tmp/cogchemists-train-bridge tools/train_bridge.nim
+python3 tools/test_train_bridge.py /tmp/cogchemists-train-bridge
+```
+
+From a Metta checkout with the Coworld training stack installed, pass the
+absolute bridge binary and manifest paths to `recipes.external.coworld.train`
+for native PufferLib or `recipes.external.coworld_metta_rl.train` for Metta RL.
+Set `players=4`; both `standard` and `silent-academy` variants are supported.
