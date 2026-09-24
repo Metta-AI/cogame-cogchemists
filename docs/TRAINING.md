@@ -56,3 +56,7 @@ From a Metta checkout with the Coworld training stack installed, pass the
 absolute bridge binary and manifest paths to `recipes.external.coworld.train`
 for native PufferLib or `recipes.external.coworld_metta_rl.train` for Metta RL.
 Set `players=4`; both `standard` and `silent-academy` variants are supported.
+
+Both variants completed 512 Metta RL timesteps. At epoch ten, evaluation
+mean return was 0.446 for standard and 0.280 for silent academy. These
+pilots verify the numeric observation and reward path, not improved play.
