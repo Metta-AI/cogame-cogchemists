@@ -60,3 +60,11 @@ Set `players=4`; both `standard` and `silent-academy` variants are supported.
 Both variants completed 512 Metta RL timesteps. At epoch ten, evaluation
 mean return was 0.446 for standard and 0.280 for silent academy. These
 pilots verify the numeric observation and reward path, not improved play.
+
+Native PufferLib completed 4,096 CUDA timesteps per variant on metta1.
+Checkpoint reload and held-out seeds 101 and 102 each reported mean score
+13.2 for both variants. Checkpoint SHA-256 values were
+`2bd800ce9edbdb762dc0fa787f3192529c02453fea271ec83557cea2ff1c1779`
+for standard and
+`6531c2421b3450ac5b99f50d8953b978abf8befc9d820319b828ea2b6493aea8`
+for silent academy.
