@@ -149,6 +149,18 @@ jobs:
           done
           exit "${fail}"
 
+      - name: Export full post-training matches
+        run: |
+          nim c --hints:off -d:release --path:src \
+            -o:/tmp/cogchemists-posttrain tools/export_posttrain.nim
+          python3 tools/test_export_posttrain.py /tmp/cogchemists-posttrain
+
+      - name: Play numeric training matches
+        run: |
+          nim c --hints:off -d:release --path:src \
+            -o:/tmp/cogchemists-train-bridge tools/train_bridge.nim
+          python3 tools/test_train_bridge.py /tmp/cogchemists-train-bridge
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.
