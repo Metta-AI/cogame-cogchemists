@@ -1,9 +1,8 @@
-## Cogchemists player: a policy is just a prompt.
+## Cogchemists prompt, scripted, or external Jev player.
 ##
-## Connects to the game, delivers its prompt (from PLAYER_PROMPT, or a
-## default alchemy strategy in words), then idles until the final frame.
-## All of the actual decision making happens inside the game server, which
-## sends this seat's prompt to Claude once per phase.
+## Prompt and scripted policies register with the game, then idle until the
+## final frame. PLAYER_JEV=1 receives the seat-local state and ranks its
+## exact legal moves in this player container.
 ##
 ## PLAYER_SCRIPTED=assayer (or 1) registers the seat as the built-in
 ## competent scientist instead; PLAYER_SCRIPTED=quack as the reckless
@@ -15,7 +14,8 @@
 
 import
   std/[json, options, os, strutils, unicode],
-  whisky
+  whisky,
+  cogchemists/jev_policy
 
 const
   MaxPromptLen = 4000
@@ -38,6 +38,7 @@ when isMainModule:
   let url = getEnv("COWORLD_PLAYER_WS_URL")
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
+  let jev = getEnv("PLAYER_JEV") == "1"
   var prompt = getEnv("PLAYER_PROMPT")
   if prompt.len == 0:
     prompt = DefaultPrompt
@@ -52,9 +53,13 @@ when isMainModule:
 
   echo "cogchemists player: connecting to game"
   let socket = newWebSocket(url)
-  socket.send(promptFrame())
-  echo "cogchemists player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
+  if jev:
+    socket.send($ %*{"type": "register", "control": "external"})
+    echo "cogchemists player: external Jev control registered"
+  else:
+    socket.send(promptFrame())
+    echo "cogchemists player: prompt delivered (", prompt.len, " chars",
+      (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
 
   ## whisky RAISES on a close frame or a truncated read (only a timeout
   ## returns none) and mummy's send only queues, so the game's quit(0) can
@@ -77,7 +82,16 @@ when isMainModule:
             payload{"slot"}.getInt(), " as ", payload{"name"}.getStr()
           ## Re-deliver the prompt after the welcome, in case the first
           ## send raced the server's slot registration.
-          socket.send(promptFrame())
+          if jev:
+            socket.send($ %*{"type": "register", "control": "external"})
+          else:
+            socket.send(promptFrame())
+        of "observation":
+          if jev:
+            var action = chooseAction(payload["observation"],
+              getEnv("PLAYER_PROMPT"))
+            action["id"] = payload["id"]
+            socket.send($action)
         of "final":
           echo "cogchemists player: final scores ", payload{"scores"}
           break

@@ -8,11 +8,11 @@
 ##   GET /client/renderer.js         - shared stage renderer
 ##   GET /client/chrome.css          - shared chrome
 ##   GET /client/assets/<name>       - sprites and fonts
-##   WS  /player?slot=N&token=T      - player protocol (prompt delivery)
+##   WS  /player?slot=N&token=T      - player protocol
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
-## Player protocol (cogchemists.player.v1), all JSON text frames:
+## Player protocol (cogchemists.player.v2), all JSON text frames:
 ##   game -> player: {"type":"welcome","slot":N,"name":...,"rounds":N}
 ##                   {"type":"state",...} after every event, redacted to
 ##                   exactly what that seat may see
@@ -20,6 +20,10 @@
 ##   player -> game: {"type":"prompt","prompt":"...","scripted":"assayer"}
 ##                   (max 4000 runes; scripted plays a built-in baseline for
 ##                   that seat: "assayer" / "1", or "quack")
+##                   {"type":"register","control":"external"}
+##                   {"type":"action","id":N,"move":"exact legal label"}
+##   game -> external player: {"type":"observation","id":N,
+##                   "observation":<acting seat's redacted state>}
 
 import
   std/[json, locks, os, sets, strutils, tables, times, unicode],
@@ -40,6 +44,12 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
+    external: seq[bool]
+    registered: seq[bool]
+    decisionId: int
+    pending: seq[bool]
+    accepted: seq[bool]
+    actions: seq[Action]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -224,6 +234,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var allConnected = false
       withLock stateLock:
         allConnected = state.playerSockets.len >= config.tokens.len
+        for registered in state.registered:
+          allConnected = allConnected and registered
       if allConnected:
         break
       sleep(200)
@@ -299,12 +311,48 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         sleep(50)
         continue
 
-      ## The slow part (Claude, one parallel batch for the whole phase)
-      ## runs outside the lock on a snapshot; only this thread mutates the
-      ## sim, so the snapshot cannot go stale.
+      ## External players decide over the same phase snapshot as prompt and
+      ## scripted seats. Send all observations before waiting for any reply.
+      var clientScripted = newSeq[ScriptKind](scripted.len)
+      for slot in 0 ..< scripted.len:
+        clientScripted[slot] = scripted[slot]
+      withLock stateLock:
+        inc state.decisionId
+        for seat in seats:
+          if state.external[seat]:
+            clientScripted[seat] = skAssayer
+            state.pending[seat] = true
+            state.accepted[seat] = false
+            if state.playerSockets.hasKey(seat):
+              state.playerSockets[seat].send($ %*{
+                "type": "observation", "id": state.decisionId,
+                "observation": simCopy.observationJson(seat)
+              })
+
+      ## The prompt seats remain one parallel Claude batch. External players
+      ## are represented by a baseline until their own action arrives.
       var fromScript: seq[bool]
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted,
+      var decisions = client.decideAll(simCopy, seats, prompts, clientScripted,
         fromScript)
+
+      let deadline = epochTime() + config.llmTimeoutSeconds.float
+      while epochTime() < deadline:
+        var waiting = false
+        withLock stateLock:
+          for seat in seats:
+            if state.pending[seat] and not state.accepted[seat] and
+                state.playerSockets.hasKey(seat):
+              waiting = true
+        if not waiting:
+          break
+        sleep(20)
+
+      withLock stateLock:
+        for index, seat in seats:
+          if state.pending[seat] and state.accepted[seat]:
+            decisions[index] = state.actions[seat]
+            fromScript[index] = false
+          state.pending[seat] = false
 
       withLock stateLock:
         for seat in order:
@@ -421,7 +469,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         state.playerSockets.len, "/", state.config.tokens.len, ")"
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "cogchemists.player.v1",
+        "protocol": "cogchemists.player.v2",
         "slot": slot,
         "name": state.sim.names[slot],
         "rounds": state.config.rounds
@@ -479,9 +527,30 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.external[slot] = false
+            state.registered[slot] = true
           echo "cogchemists: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
+        elif payload{"type"}.getStr() == "register" and
+            payload["control"].getStr() == "external":
+          withLock stateLock:
+            state.external[slot] = true
+            state.registered[slot] = true
+          echo "cogchemists: slot ", slot, " registered external control"
+        elif payload{"type"}.getStr() == "action":
+          let id = payload["id"].getInt()
+          let move = payload["move"].getStr()
+          withLock stateLock:
+            if state.external[slot] and state.pending[slot] and
+                state.decisionId == id and not state.accepted[slot]:
+              for action in state.sim.legalActs(slot):
+                if showAct(action) == move:
+                  state.actions[slot] = action
+                  state.actions[slot].say = payload{"say"}.getStr()
+                  state.actions[slot].notes = payload{"notes"}.getStr()
+                  state.accepted[slot] = true
+                  break
       except CatchableError as error:
         echo "cogchemists: ignoring bad player frame: ", error.msg
     of ErrorEvent:
@@ -556,6 +625,11 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
+  state.external = newSeq[bool](config.players.len)
+  state.registered = newSeq[bool](config.players.len)
+  state.pending = newSeq[bool](config.players.len)
+  state.accepted = newSeq[bool](config.players.len)
+  state.actions = newSeq[Action](config.players.len)
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)

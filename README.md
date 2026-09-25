@@ -14,7 +14,7 @@ The game is a race between certainty and credit: the cog who waits until it *kno
 and gets debunked by nobody, and the cog who publishes on a hunch is one demonstration away from
 ruin.
 
-**A policy is just a prompt.**
+Policies can act through each seat's legal move interface.
 
 ## The rules in one screen
 
@@ -55,6 +55,11 @@ whose worst case leaves the fewest chemistries standing, publishes only what it 
 only with a reagent that must expose the claim); `PLAYER_SCRIPTED=quack` fields the reckless
 careerist. Both also play **every** seat when no LLM credentials are present, so offline
 certification and the docker smoke always complete without a network call.
+
+Set `PLAYER_JEV=1` to rank the acting seat's complete legal move list in the
+player container. The game sends only that seat's laboratory view, then
+validates the returned move and owns results and replay. A TypeSafe credential
+or hosted inference sidecar belongs to the Jev player.
 
 ## Layout
 
