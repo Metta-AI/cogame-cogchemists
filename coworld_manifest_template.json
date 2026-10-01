@@ -24,9 +24,7 @@
       "run": [
         "/bin/cogchemists"
       ],
-      "env": {
-        "ANTHROPIC_API_KEY_URI": "secret://coworld/cogchemists/anthropic_api_key"
-      },
+      "env": {},
       "source_url": "https://github.com/Metta-AI/cogame-cogchemists/tree/main"
     },
     "config_schema": {
