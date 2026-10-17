@@ -36,6 +36,18 @@
         "players"
       ],
       "properties": {
+        "promptVariant": {
+          "type": "string",
+          "enum": ["canonical", "plain", "numbered", "questions", "reordered", "heldout-briefing", "heldout-reference", "mixed"],
+          "default": "canonical",
+          "description": "Episode-stable rule wording; held-out variants are evaluation-only."
+        },
+        "promptSeed": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Independent wording selector. Required explicitly for mixed; never changes game randomness."
+        },
         "tokens": {
           "description": "One connection token per player slot, indexed by slot.",
           "type": "array",

@@ -26,12 +26,13 @@
 ##                   "observation":<acting seat's redacted state>}
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
-  bitworld/runtime,
+  std/[json, locks, options, os, sets, strutils, tables, times, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const
@@ -41,6 +42,8 @@ const
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
+    trajectory: Option[DecisionTrajectory]
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
@@ -176,6 +179,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     grace = state.config.shutdownGraceSeconds
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if state.trajectory.isSome:
+      var outcomes = newJObject()
+      for seat in 0 ..< Seats:
+        outcomes[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.get().finish(
+        if results["reason"].getStr() == "complete": esCompleted else: esTruncated,
+        results, outcomes)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -332,8 +343,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The prompt seats remain one parallel Claude batch. External players
       ## are represented by a baseline until their own action arrives.
       var fromScript: seq[bool]
+      var evidence: seq[seq[DecisionAttempt]]
       var decisions = client.decideAll(simCopy, seats, prompts, clientScripted,
-        fromScript)
+        fromScript, evidence, state.selection)
 
       let deadline = epochTime() + config.llmTimeoutSeconds.float
       while epochTime() < deadline:
@@ -352,6 +364,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if state.pending[seat] and state.accepted[seat]:
             decisions[index] = state.actions[seat]
             fromScript[index] = false
+          if state.external[seat]:
+            var entry = newDecisionAttempt("external", "external-player",
+              if state.accepted[seat]: aoUnknown else: aoFallback)
+            entry.parsedAction = actionReply(decisions[index])
+            entry.accepted = true
+            evidence[index] = @[entry]
           state.pending[seat] = false
 
       withLock stateLock:
@@ -367,16 +385,44 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           ## twice and took the scripted move is recorded scripted: true —
           ## the same as a configured scripted seat or a disabled client.
           let wasScripted = fromScript[position]
-          try:
+          let rejection = state.sim.checkAct(seat, decision)
+          var executed = decision
+          if rejection.len == 0:
             state.sim.applyAct(seat, decision, wasScripted)
-            echo "cogchemists: ", state.sim.names[seat], " plays ",
-              showAct(decision)
-          except CogchemistsError as error:
-            ## An earlier seat in this same phase undid the move. Recorded
-            ## as rejected and degraded to pass; the episode advances.
+            echo "cogchemists: ", state.sim.names[seat], " plays ", showAct(decision)
+          else:
             echo "cogchemists: ", state.sim.names[seat], " rejected (",
-              error.msg, "); passing"
-            state.sim.applyRejection(seat, decision, error.msg, wasScripted)
+              rejection, "); passing"
+            state.sim.applyRejection(seat, decision, rejection, wasScripted)
+            executed = newAction("pass", say = decision.say, notes = decision.notes)
+          if state.trajectory.isSome:
+            var attempts = evidence[position]
+            var selected = none(string)
+            var status = asFallback
+            var fallback = some("scripted-assayer")
+            var promptAttempts = newJArray()
+            for entry in attempts.mitems:
+              if rejection.len > 0 and entry.accepted:
+                entry.accepted = false
+                entry.rejectionReason = some(rejection)
+              if entry.accepted and entry.origin != aoFallback:
+                selected = some(entry.attemptId)
+                status = asAccepted
+                fallback = none(string)
+              if entry.origin in {aoModel, aoTeacher}:
+                promptAttempts.add(%*{"attempt_id": entry.attemptId,
+                  "prompt_template": state.selection.promptMetadata(
+                    entry.prompt[0]["content"].getStr(), entry.prompt[1]["content"].getStr())})
+            if rejection.len > 0:
+              fallback = some("phase-conflict-pass")
+            elif state.external[seat] and not state.accepted[seat]:
+              fallback = some("external-timeout-assayer")
+            var observation = simCopy.observationJson(seat)
+            observation["prompt_selection"] = state.selection.selectionMetadata()
+            observation["prompt_attempts"] = promptAttempts
+            state.trajectory.get().recordDecision($state.decisionId & "-" & $seat,
+              $seat, observation, attempts, selected, actionReply(executed),
+              status, fallbackOrigin = fallback)
         state.broadcastLocked()
 
       if config.turnDelayMs > 0:
@@ -622,7 +668,13 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(CogchemistsError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(if runtimeConfig.config.len == 0:
+    newJObject() else: parseJson(runtimeConfig.config))
   state.sim = initSim(config)
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "cogchemists-" & $config.seed, "cogchemists",
+      getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   state.external = newSeq[bool](config.players.len)

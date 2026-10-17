@@ -42,7 +42,7 @@ jobs:
   # ---------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
 
@@ -160,6 +160,13 @@ jobs:
           nim c --hints:off -d:release --path:src \
             -o:/tmp/cogchemists-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/cogchemists-train-bridge
+          python3 tools/test_prompt_variants.py /tmp/cogchemists-train-bridge
+
+      - name: Play complete native prompt variants
+        run: |
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/cogchemists-game src/cogchemists.nim
+          nim c --parallelBuild:1 -d:release --path:src -o:/tmp/cogchemists-player src/cogchemists_player.nim
+          python3 tools/test_prompt_native_games.py /tmp/cogchemists-game /tmp/cogchemists-player /tmp/cogchemists-native-prompts "$GITHUB_SHA"
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

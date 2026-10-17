@@ -20,10 +20,11 @@
 ## load-bearing. The same scripted bots are also fieldable policies.
 
 import
-  std/[json, os, random, strutils, times, unicode],
-  bitworld/runtime,
+  std/[json, options, os, random, strutils, times, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
-  sim
+  sim,
+  prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -346,6 +347,13 @@ proc normalizeVerb(text: string): string =
   while "__" in result:
     result = result.replace("__", "_")
 
+proc actionReply*(action: Action): JsonNode =
+  %*{"action": action.action,
+    "a": (if action.a >= 0: IngredientNames[action.a] else: ""),
+    "b": (if action.b >= 0: IngredientNames[action.b] else: ""),
+    "signature": (if action.signature >= 0: sigName(action.signature) else: ""),
+    "artifact": action.artifact, "say": action.say, "notes": action.notes}
+
 proc parseReply*(sim: Sim, seat: int, payload: JsonNode): Action =
   ## Turns one model reply into an Action. Raises CogchemistsError on
   ## anything the schema cannot read; the caller retries once and then
@@ -399,14 +407,11 @@ proc potionsLine(): string =
   names.add($poMud)
   names.join(", ")
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  let me = sim.names[seat]
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   var ingredients: seq[string]
   for name in IngredientNames:
     ingredients.add(name)
-  result = "You are " & me & ", an alchemist of the Academy. Four cogs " &
-    "share one laboratory for " & $sim.config.rounds & " rounds, racing to " &
-    "publish a secret chemistry before anyone can disprove them.\n\n" &
+  result = selection.introduction(sim.names[seat], sim.config.rounds) &
     "THE EIGHT INGREDIENTS: " & ingredients.join(", ") & ".\n" &
     "A SIGNATURE is three signs over RED, GREEN and BLUE, written like " &
     "R+G-B+. There are 8. The episode's chemistry is a BIJECTION " &
@@ -753,7 +758,9 @@ proc decideAll*(
   seats: seq[int],
   prompts: seq[string],
   scripted: seq[ScriptKind],
-  fromScript: var seq[bool]
+  fromScript: var seq[bool],
+  evidence: var seq[seq[DecisionAttempt]],
+  selection: PromptSelection
 ): seq[Action] =
   ## One decision per seat in `seats`, in order, as ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
@@ -766,6 +773,7 @@ proc decideAll*(
   ## so a fallback is never recorded as a real decision.
   result = newSeq[Action](seats.len)
   fromScript = newSeq[bool](seats.len)
+  evidence = newSeq[seq[DecisionAttempt]](seats.len)
   var open: seq[int]     ## indexes into `seats` still undecided
   for index, seat in seats:
     let kind = scripted[seat]
@@ -773,6 +781,16 @@ proc decideAll*(
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skAssayer else: kind))
       fromScript[index] = true
+      var entry = newDecisionAttempt("scripted", "scripted-" &
+        $(if kind == skNone: skAssayer else: kind),
+        if kind == skNone: aoFallback else: aoTeacher)
+      entry.parsedAction = actionReply(result[index])
+      entry.accepted = true
+      if kind != skNone:
+        entry.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
+          {"role": "user", "content": sim.userPrompt(seat, prompts[seat])}]
+        entry.response = %($entry.parsedAction)
+      evidence[index].add(entry)
     else:
       open.add(index)
   for attempt in 0 .. 1:
@@ -785,7 +803,15 @@ proc decideAll*(
       if attempt > 0:
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object, copying one line of LEGAL MOVES.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let system = systemPrompt(sim, seat, selection)
+      let request = client.requestFor(system, user, seat)
+      var entry = newDecisionAttempt("model-" & $attempt, "model", aoModel)
+      entry.prompt = %*[{"role": "system", "content": system},
+        {"role": "user", "content": user}]
+      entry.request = parseJson(request.body)
+      entry.model = some(if client.transport == ltBedrock:
+        client.bedrockModels[client.bedrockModel] else: client.model)
+      evidence[index].add(entry)
       batch.post(request.url, request.headers, request.body, $index)
     client.awaitBatchSlot()
     client.lastBatchAt = epochTime()
@@ -793,16 +819,22 @@ proc decideAll*(
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      if responses[position].response.body.len > 0:
+        evidence[index][^1].rawResponse = %responses[position].response.body
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        evidence[index][^1].response = %text
         let action = parseReply(sim, seat, extractJsonObject(text))
+        evidence[index][^1].parsedAction = actionReply(action)
         ## Reject moves the rules refuse HERE, so the retry carries the
         ## hint instead of the episode taking a silent fallback.
         var probe = sim
         probe.applyAct(seat, action, false)
         result[index] = action
+        evidence[index][^1].accepted = true
       except CatchableError as error:
+        evidence[index][^1].rejectionReason = some(error.msg)
         echo "cogchemists llm: seat ", seat, " attempt ", attempt,
           " failed: ", error.msg
         stillOpen.add(index)
@@ -812,3 +844,7 @@ proc decideAll*(
     echo "cogchemists llm: seat ", seat, " falling back to scripted decision"
     result[index] = scriptedAction(sim, seat, skAssayer)
     fromScript[index] = true
+    var entry = newDecisionAttempt("fallback", "scripted-assayer", aoFallback)
+    entry.parsedAction = actionReply(result[index])
+    entry.accepted = true
+    evidence[index].add(entry)
