@@ -5,7 +5,6 @@
 ## the schema documents.
 
 import std/[json, monotimes, os, strutils, times, unicode, unittest]
-import bitworld/decision_trajectory
 import cogchemists/[llm, sim, prompts]
 
 const
@@ -148,9 +147,8 @@ suite "the no-credentials fallback":
       let seats = sim.pendingSeats()
       check seats.len == Seats
       var fromScript: seq[bool]
-      var evidence: seq[seq[DecisionAttempt]]
       let decisions = client.decideAll(sim, seats,
-        newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript, evidence, PromptSelection())
+        newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript, PromptSelection())
       check decisions.len == Seats
       ## Every one of those actions came from the baseline, and decideAll
       ## says so per seat, so the recorded event cannot claim otherwise.
@@ -189,9 +187,8 @@ suite "the no-credentials fallback":
     sim.drive()
     let seats = sim.pendingSeats()
     var fromScript: seq[bool]
-    var evidence: seq[seq[DecisionAttempt]]
     let decisions = client.decideAll(sim, seats,
-      newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript, evidence, PromptSelection())
+      newSeq[string](Seats), newSeq[ScriptKind](Seats), fromScript, PromptSelection())
     check decisions.len == Seats
     check fromScript == @[true, true, true, true]
     for seat in initiativeOrder(sim.round):

@@ -1,7 +1,8 @@
-## Export complete engine-resolved episodes as private candidate evidence.
-import std/[json, options, os, osproc, strutils]
-import bitworld/decision_trajectory
-import cogchemists/[sim, llm, prompts]
+## Export complete native Cogchemists matches as Metta post-training rows.
+## nim c -d:release --path:src -o:/tmp/cogchemists-posttrain tools/export_posttrain.nim
+
+import std/[json, os, osproc, strutils]
+import cogchemists/[chem, sim, llm, prompts]
 
 when isMainModule:
   let args = commandLineParams()
@@ -10,18 +11,15 @@ when isMainModule:
   let output = args[0]
   let episodes = parseInt(args[1])
   let variant = args[2]
-  let selection = promptSelection(if args.len == 5:
+  let initialSelection = promptSelection(if args.len == 5:
     %*{"promptVariant": args[3], "promptSeed": parseInt(args[4])} else: newJObject())
-  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+  if initialSelection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
     raise newException(ValueError, "held-out prompt variants are evaluation-only")
-  doAssert episodes >= 10
-  doAssert not dirExists(output) and not fileExists(output)
-  let status = execCmdEx("git status --porcelain")
-  doAssert status.exitCode == 0 and status.output.strip().len == 0,
-    "Commit the qualified source before generating a pinned training corpus"
-  let head = execCmdEx("git rev-parse HEAD")
-  doAssert head.exitCode == 0
-  let revision = head.output.strip()
+  doAssert execProcess("git status --porcelain").strip().len == 0, "commit source before export"
+  if episodes < 10:
+    quit("at least ten games are required", 1)
+  if dirExists(output) or fileExists(output):
+    quit("output already exists: " & output, 1)
   let manifest = parseFile("coworld_manifest_template.json")
   var variantConfig = newJNull()
   for entry in manifest["variants"]:
@@ -30,77 +28,84 @@ when isMainModule:
   doAssert variantConfig.kind == JObject
   createDir(output)
   setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
+  let revision = execProcess("git rev-parse HEAD").strip()
   var
-    completeEpisodes: seq[string]
+    trainRows: seq[string]
+    validationRows: seq[string]
     runs = newJArray()
   for seed in 1 .. episodes:
+    var selection = initialSelection
+    if selection.variant == pvMixed: selection.seed += seed - 1
+    let episode = "cogchemists-" & variant & "-" & $seed & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
     variantConfig["seed"] = %seed
     var config = defaultGameConfig()
     config.update($variantConfig)
     config = sampleEpisode(config)
     var game = initSim(config)
-    let family = "cogchemists-" & $seed
-    let episodeId = family & "-" & variant & "-" &
-      $selection.selectedVariant & "-" & $selection.seed
-    let trajectory = newDecisionTrajectory(episodeId, family, "cogchemists",
-      "source-" & revision, revision)
-    var decisionId = 0
-    while game.needsAdvance():
-      game.advance()
+    var rows: seq[string]
+    var decisionId, rejected = 0
     while not game.done:
-      let before = game
-      let order = initiativeOrder(game.round)
-      var actions: array[Seats, Action]
-      var rejections: array[Seats, string]
-      for seat in 0 ..< Seats:
-        actions[seat] = parseReply(before, seat,
-          actionReply(scriptedAction(before, seat, skAssayer)))
-        doAssert before.checkAct(seat, actions[seat]) == ""
-      for seat in order:
-        rejections[seat] = game.checkAct(seat, actions[seat])
-        if rejections[seat].len == 0:
-          game.applyAct(seat, actions[seat], true)
-        else:
-          game.applyRejection(seat, actions[seat], rejections[seat], true)
       while game.needsAdvance():
         game.advance()
-      for position, seat in order:
-        let system = systemPrompt(before, seat, selection)
-        let user = userPrompt(before, seat, "")
-        var observation = before.observationJson(seat)
-        observation["prompt_template"] = selection.promptMetadata(system, user)
-        var attempt = newDecisionAttempt($decisionId & "-teacher",
-          "scripted-assayer", aoTeacher)
-        attempt.prompt = %*[{"role": "system", "content": system},
-          {"role": "user", "content": user}]
-        attempt.parsedAction = actionReply(actions[seat])
-        attempt.response = %($attempt.parsedAction)
-        attempt.accepted = rejections[seat].len == 0
-        var executed = attempt.parsedAction
-        if not attempt.accepted:
-          attempt.rejectionReason = some(rejections[seat])
-          executed = actionReply(newAction("pass", say = actions[seat].say,
-            notes = actions[seat].notes))
-        trajectory.recordDecision($decisionId, $seat, observation, @[attempt],
-          if attempt.accepted: some(attempt.attemptId) else: none(string),
-          executed, if attempt.accepted: asAccepted else: asFallback,
-          game.done and position == order.high,
-          if attempt.accepted: none(string) else: some("phase-conflict-pass"))
+      if game.done: break
+      var actions: array[Seats, Action]
+      var proposals: array[Seats, string]
+      for seat in 0 ..< Seats:
+        let teacher = scriptedAction(game, seat, skAssayer)
+        let reply = %*{
+          "action": teacher.action,
+          "a": (if teacher.a >= 0: IngredientNames[teacher.a] else: ""),
+          "b": (if teacher.b >= 0: IngredientNames[teacher.b] else: ""),
+          "signature": (if teacher.signature >= 0:
+            sigName(teacher.signature) else: ""),
+          "artifact": teacher.artifact,
+          "say": teacher.say,
+          "notes": teacher.notes
+        }
+        actions[seat] = parseReply(game, seat, reply)
+        doAssert game.checkAct(seat, actions[seat]) == ""
+        proposals[seat] = $(%*{
+          "episode_id": episode,
+          "seed": "cogchemists-" & $seed,
+          "decision_id": decisionId,
+          "prompt": [
+            {"role": "system", "content": systemPrompt(game, seat, selection)},
+            {"role": "user", "content": userPrompt(game, seat, "")}
+          ],
+          "completion": [{"role": "assistant", "content": $reply}],
+          "game": "cogchemists",
+          "action_schema_revision": "cogchemists-phase-v1"
+        })
         inc decisionId
+      for seat in initiativeOrder(game.round):
+        let rejection = game.checkAct(seat, actions[seat])
+        if rejection.len == 0:
+          game.applyAct(seat, actions[seat], true)
+          rows.add(proposals[seat])
+        else:
+          game.applyRejection(seat, actions[seat], rejection, true)
+          inc rejected
     doAssert game.reason == "complete"
-    let results = game.resultsJson()
-    var participants = newJObject()
-    for seat in 0 ..< Seats:
-      participants[$seat] = %*{"score": results["scores"][seat]}
-    trajectory.finish(esCompleted, results, participants)
-    completeEpisodes.add(trajectory.eventsJsonl())
-    runs.add(%*{"seed": seed, "rounds": game.roundsPlayed,
-      "decisions": decisionId, "scores": results["scores"]})
-  writePrivate(output / "trajectories.jsonl", completeEpisodes.join(""))
-  writePrivate(output / "manifest.json", pretty(%*{
-    "schema_version": 1, "game": "cogchemists", "variant": variant,
-    "source_revision": revision, "teacher": "scripted-assayer",
-    "prompt_selection": selection.selectionMetadata(),
-    "split_authority": "shared Coworld SDK and application importer by seed_family",
-    "runs": runs}) & "\n")
-  echo "complete games=", episodes
+    if seed mod 5 == 0:
+      validationRows.add(rows)
+    else:
+      trainRows.add(rows)
+    runs.add(%*{"seed": seed, "episode": episode, "rounds": game.roundsPlayed,
+      "prompt_selection": selection.selectionMetadata(),
+      "accepted_examples": rows.len, "rejected_proposals": rejected,
+      "scores": game.resultsJson()["scores"]})
+  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
+  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
+  writeFile(output / "manifest.json", pretty(%*{
+    "schema_version": 1,
+    "prompt_selection": initialSelection.selectionMetadata(),
+    "game": "cogchemists",
+    "variant": variant,
+    "source_revision": revision,
+    "teacher": "assayer",
+    "train_examples": trainRows.len,
+    "validation_examples": validationRows.len,
+    "runs": runs
+  }) & "\n")
+  echo "train=", trainRows.len, " validation=", validationRows.len

@@ -16,7 +16,7 @@ type
     variant*: PromptVariant
     seed*: int
 
-const PromptBankVersion* = "cogchemists-rules-v1"
+const PromptBankVersion* = "cogchemists-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:
@@ -81,3 +81,29 @@ proc introduction*(selection: PromptSelection, name: string, rounds: int): strin
       "can disprove your claims.\n\n"
   of pvMixed:
     raise newException(ValueError, "mixed selection must resolve to a wording")
+
+const ChemistryBriefings = [
+  "THE EIGHT INGREDIENTS: $1.\nA SIGNATURE is three signs over RED, GREEN and BLUE, written like R+G-B+. There are 8. The episode's chemistry is a BIJECTION ingredient -> signature: every signature is used exactly once, so no two ingredients share one. Nobody is told it.\n\n",
+  "The eight ingredients are $1. Each has one of eight signatures, consisting of a RED, GREEN and BLUE sign, such as R+G-B+. Every signature belongs to exactly one ingredient. The assignment is hidden from every player.\n\n",
+  "Chemistry setup:\n1. Ingredients: $1.\n2. A signature has three signs, one each for RED, GREEN and BLUE; for example R+G-B+.\n3. There are eight signatures, assigned one-to-one to the eight ingredients. None is repeated.\n4. No player is told this assignment.\n\n",
+  "Which ingredients exist? $1. What is a signature? Three signs over RED, GREEN and BLUE, for example R+G-B+. How many are there? Eight. How are they assigned? Each ingredient has a different signature, and each signature is used once. Who is told the assignment? Nobody.\n\n",
+  "Nobody is told the chemistry assignment. It pairs eight ingredients with eight distinct signatures, using each exactly once. A signature specifies signs for RED, GREEN and BLUE, as in R+G-B+. Your ingredients are $1.\n\n",
+  "Chemistry briefing: the ingredients are $1. Their secret assignment uses all eight signatures exactly once; two ingredients never share a signature. A signature consists of three signs, over RED, GREEN and BLUE, such as R+G-B+. No participant is told the assignment.\n\n",
+  "Chemistry reference\nIngredients: $1.\nSignature notation: three signs over RED, GREEN and BLUE, e.g. R+G-B+.\nSignature count: eight.\nAssignment: one-to-one; every signature appears exactly once.\nDisclosure: nobody is told the assignment.\n\n"
+]
+
+const PhaseBriefings = [
+  "Decisions inside a phase are SIMULTANEOUS. A move that is legal now can\nstill be rejected by an earlier seat in the same phase (two seats\npublishing the same ingredient, a debunk of a seal that has just burned);\na rejected move is recorded as such and degrades to pass (+1 coin).\n\n",
+  "Choose simultaneously with the other seats in each phase. An earlier seat's resolution can make your legal choice fail, such as publishing an ingredient they just claimed or debunking a seal they already burned. The game records the rejection and substitutes pass, giving +1 coin.\n\n",
+  "Phase resolution:\n1. All seats choose simultaneously.\n2. Earlier seats may invalidate a legal proposal by publishing the same ingredient or burning the seal it targets.\n3. Such a move is recorded as rejected and replaced by pass (+1 coin).\n\n",
+  "When do seats decide? Simultaneously within each phase. Can a currently legal move fail? Yes: an earlier seat may publish the same ingredient or burn the seal you intended to debunk. What happens then? Record the rejection and resolve your move as pass (+1 coin).\n\n",
+  "A rejected move becomes pass (+1 coin) and remains recorded as rejected. This can happen even to a currently legal choice: all seats decide simultaneously, but an earlier seat may claim the ingredient you publish or burn the seal you debunk.\n\n",
+  "Resolution briefing: everyone chooses at once within the phase. Legal proposals can conflict when resolved: an earlier seat may publish your ingredient or burn your intended debunk target. A rejected proposal is recorded and replaced by pass, worth +1 coin.\n\n",
+  "Phase reference\nChoice timing: simultaneous.\nConflict examples: an earlier seat publishes the same ingredient or burns the seal targeted by your debunk.\nConsequence: a legal proposal may be rejected, recorded as rejected, and replaced with pass (+1 coin).\n\n"
+]
+
+proc chemistryBriefing*(selection: PromptSelection, ingredients: string): string =
+  ChemistryBriefings[ord(selection.selectedVariant)] % [ingredients]
+
+proc phaseBriefing*(selection: PromptSelection): string =
+  PhaseBriefings[ord(selection.selectedVariant)]
