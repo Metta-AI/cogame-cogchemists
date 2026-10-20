@@ -160,6 +160,7 @@ jobs:
           nim c --hints:off -d:release --path:src \
             -o:/tmp/cogchemists-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/cogchemists-train-bridge
+          python3 tools/test_prompt_variants.py /tmp/cogchemists-train-bridge
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

@@ -23,7 +23,8 @@ import
   std/[json, os, random, strutils, times, unicode],
   bitworld/runtime,
   curly,
-  sim
+  sim,
+  prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -346,6 +347,13 @@ proc normalizeVerb(text: string): string =
   while "__" in result:
     result = result.replace("__", "_")
 
+proc actionReply*(action: Action): JsonNode =
+  %*{"action": action.action,
+    "a": (if action.a >= 0: IngredientNames[action.a] else: ""),
+    "b": (if action.b >= 0: IngredientNames[action.b] else: ""),
+    "signature": (if action.signature >= 0: sigName(action.signature) else: ""),
+    "artifact": action.artifact, "say": action.say, "notes": action.notes}
+
 proc parseReply*(sim: Sim, seat: int, payload: JsonNode): Action =
   ## Turns one model reply into an Action. Raises CogchemistsError on
   ## anything the schema cannot read; the caller retries once and then
@@ -399,19 +407,12 @@ proc potionsLine(): string =
   names.add($poMud)
   names.join(", ")
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  let me = sim.names[seat]
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   var ingredients: seq[string]
   for name in IngredientNames:
     ingredients.add(name)
-  result = "You are " & me & ", an alchemist of the Academy. Four cogs " &
-    "share one laboratory for " & $sim.config.rounds & " rounds, racing to " &
-    "publish a secret chemistry before anyone can disprove them.\n\n" &
-    "THE EIGHT INGREDIENTS: " & ingredients.join(", ") & ".\n" &
-    "A SIGNATURE is three signs over RED, GREEN and BLUE, written like " &
-    "R+G-B+. There are 8. The episode's chemistry is a BIJECTION " &
-    "ingredient -> signature: every signature is used exactly once, so no " &
-    "two ingredients share one. Nobody is told it.\n\n" &
+  result = selection.introduction(sim.names[seat], sim.config.rounds) &
+    selection.chemistryBriefing(ingredients.join(", ")) &
     """MIXING TWO INGREDIENTS:
 1. Look at the aspects where the two signatures DISAGREE.
 2. If they disagree on exactly ONE aspect, the potion takes that aspect's
@@ -467,12 +468,7 @@ author -6, each endorser -3. Seals already burned are not re-scored.
 SCORE = reputation + 0.2 x coin. HIGHER IS BETTER and it may go negative.
 Everyone starts on reputation 10 and coin 4.
 
-Decisions inside a phase are SIMULTANEOUS. A move that is legal now can
-still be rejected by an earlier seat in the same phase (two seats
-publishing the same ingredient, a debunk of a seal that has just burned);
-a rejected move is recorded as such and degrades to pass (+1 coin).
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no
+""" & selection.phaseBriefing() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no
 analysis, no explanation, no markdown fences, no text before or after the
 object. Your reply must begin with the character { and end with }."""
 
@@ -753,7 +749,8 @@ proc decideAll*(
   seats: seq[int],
   prompts: seq[string],
   scripted: seq[ScriptKind],
-  fromScript: var seq[bool]
+  fromScript: var seq[bool],
+  selection: PromptSelection
 ): seq[Action] =
   ## One decision per seat in `seats`, in order, as ONE parallel batch.
   ## Never raises: any failure falls back to the scripted baseline so the
@@ -785,7 +782,7 @@ proc decideAll*(
       if attempt > 0:
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object, copying one line of LEGAL MOVES.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     client.awaitBatchSlot()
     client.lastBatchAt = epochTime()

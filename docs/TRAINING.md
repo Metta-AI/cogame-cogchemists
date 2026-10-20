@@ -2,7 +2,7 @@
 
 The exporter runs complete production matches with the shipped `assayer`
 teacher. Each phase records the acting seat's hosted system and user prompts
-and a reply accepted by the game's parser. Four decisions are made against
+and a reply accepted by the game's parser and initiative resolution. Four decisions are made against
 one phase state, then resolve in initiative order through the native
 simulator. Both certified variants are supported.
 
@@ -16,17 +16,14 @@ python3 tools/test_export_posttrain.py /tmp/cogchemists-posttrain
 
 `train.jsonl` and `validation.jsonl` split complete games by seed. The
 manifest records source revision, variant, final scores, and row counts.
-Ten matches per variant yielded 384 training and 96 validation decisions.
+Only proposals accepted after initiative resolution become examples. Conflicted
+proposals and their forced passes are excluded; the manifest counts both accepted
+examples and rejected proposals. The requested number of complete games is unchanged.
 The exporter refuses to overwrite an output directory.
 
-From a Metta checkout with the post-training package installed:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/cogchemists-standard-dataset \
-  --output /tmp/cogchemists-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
-```
 
 These examples distill the scripted teacher and preserve each seat's private
 experiment history. They do not establish improved league play.
@@ -68,3 +65,30 @@ Checkpoint reload and held-out seeds 101 and 102 each reported mean score
 for standard and
 `6531c2421b3450ac5b99f50d8953b978abf8befc9d820319b828ea2b6493aea8`
 for silent academy.
+
+## Prompt fuzzing
+
+Select `canonical`, `plain`, `numbered`, `questions`, or `reordered` with
+`promptVariant`; `mixed` requires a nonnegative `promptSeed` and selects by
+seed modulo five. Selection remains fixed during a game and uses no game randomness.
+The v2 bank varies the role, hidden chemistry and simultaneous-resolution briefings.
+Mixing rules, action costs, scoring and the response schema remain exact.
+
+Language bridge resets support these fields with `--language`. Held-out briefing
+and reference variants require an evaluation split; teacher export rejects them.
+Private decision metadata includes the bank and exact system/user message hashes.
+
+Append `PROMPT_VARIANT PROMPT_SEED` to the exporter command. Mixed export advances
+the prompt seed separately within each split, keeping all five wordings available
+in training despite every-fifth-seed validation. Episode IDs distinguish wordings; scenario-family IDs
+exclude wording and game variant, preserving train/validation separation.
+Export from a clean committed checkout. Original train/validation JSONL files
+remain the dataset interface; no additional hosted capture protocol is introduced.
+
+`tools/test_prompt_variants.py BRIDGE_BINARY` plays 16 complete games across both
+variants, seven direct wordings and one mixed selection. The existing exporter
+check runs 20 mixed games and checks selection, accepted counts and family splits.
+Scripted invariance verifies game mechanics, not learned-policy robustness.
+
+Episode IDs include requested selection, resolved wording, and prompt seed, so
+matched explicit and mixed collections remain distinct. Scenario families stay unchanged.

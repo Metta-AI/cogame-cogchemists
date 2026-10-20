@@ -13,16 +13,61 @@ ROOT = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory() as directory:
     for variant in ("standard", "silent-academy"):
         output = Path(directory) / variant
-        subprocess.run([str(BINARY), str(output), "10", variant], cwd=ROOT, check=True)
+        subprocess.run(
+            [str(BINARY), str(output), "10", variant, "mixed", "0"],
+            cwd=ROOT,
+            check=True,
+        )
         manifest = json.loads((output / "manifest.json").read_text())
-        train = [json.loads(line) for line in (output / "train.jsonl").read_text().splitlines()]
-        validation = [json.loads(line) for line in (output / "validation.jsonl").read_text().splitlines()]
+        train = [
+            json.loads(line)
+            for line in (output / "train.jsonl").read_text().splitlines()
+        ]
+        validation = [
+            json.loads(line)
+            for line in (output / "validation.jsonl").read_text().splitlines()
+        ]
         assert manifest["game"] == "cogchemists" and manifest["variant"] == variant
         assert len(manifest["runs"]) == 10
-        assert len(train) == manifest["train_examples"] == 384
-        assert len(validation) == manifest["validation_examples"] == 96
-        assert all(run["rounds"] == 6 and len(run["scores"]) == 4
-                   for run in manifest["runs"])
+        assert (
+            len(train)
+            == manifest["train_examples"]
+            == sum(
+                run["accepted_examples"]
+                for run in manifest["runs"]
+                if run["seed"] % 5 != 0
+            )
+        )
+        assert (
+            len(validation)
+            == manifest["validation_examples"]
+            == sum(
+                run["accepted_examples"]
+                for run in manifest["runs"]
+                if run["seed"] % 5 == 0
+            )
+        )
+        assert all(
+            run["accepted_examples"] + run["rejected_proposals"] == 48
+            for run in manifest["runs"]
+        )
+        wordings = {
+            run["episode"]: run["prompt_selection"]["variant"]
+            for run in manifest["runs"]
+        }
+        assert {wordings[row["episode_id"]] for row in train} == {
+            "canonical",
+            "plain",
+            "numbered",
+            "questions",
+            "reordered",
+        }
+        assert {row["seed"] for row in train}.isdisjoint(
+            row["seed"] for row in validation
+        )
+        assert all(
+            run["rounds"] == 6 and len(run["scores"]) == 4 for run in manifest["runs"]
+        )
         for row in train + validation:
             assert row["game"] == "cogchemists"
             assert row["prompt"][0]["role"] == "system"
@@ -31,5 +76,13 @@ with tempfile.TemporaryDirectory() as directory:
             assert "LEGAL MOVES" in row["prompt"][1]["content"]
             assert "local-seat" not in json.dumps(row["prompt"])
             reply = json.loads(row["completion"][0]["content"])
-            assert set(reply) == {"action", "a", "b", "signature", "artifact", "say", "notes"}
+            assert set(reply) == {
+                "action",
+                "a",
+                "b",
+                "signature",
+                "artifact",
+                "say",
+                "notes",
+            }
         print(variant, len(train), len(validation))

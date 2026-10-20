@@ -32,6 +32,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  prompts,
   sim
 
 const
@@ -41,6 +42,7 @@ const
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
@@ -333,7 +335,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## are represented by a baseline until their own action arrives.
       var fromScript: seq[bool]
       var decisions = client.decideAll(simCopy, seats, prompts, clientScripted,
-        fromScript)
+        fromScript, state.selection)
 
       let deadline = epochTime() + config.llmTimeoutSeconds.float
       while epochTime() < deadline:
@@ -622,6 +624,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(CogchemistsError, "tokens and players must align")
   state.config = config
+  state.selection = promptSelection(if runtimeConfig.config.len == 0:
+    newJObject() else: parseJson(runtimeConfig.config))
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
