@@ -21,14 +21,9 @@ proposals and their forced passes are excluded; the manifest counts both accepte
 examples and rejected proposals. The requested number of complete games is unchanged.
 The exporter refuses to overwrite an output directory.
 
-From a Metta checkout with the post-training package installed:
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
-```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/cogchemists-standard-dataset \
-  --output /tmp/cogchemists-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
-```
 
 These examples distill the scripted teacher and preserve each seat's private
 experiment history. They do not establish improved league play.
@@ -94,3 +89,6 @@ remain the dataset interface; no additional hosted capture protocol is introduce
 variants, seven direct wordings and one mixed selection. The existing exporter
 check runs 20 mixed games and checks selection, accepted counts and family splits.
 Scripted invariance verifies game mechanics, not learned-policy robustness.
+
+Episode IDs include requested selection, resolved wording, and prompt seed, so
+matched explicit and mixed collections remain distinct. Scenario families stay unchanged.
