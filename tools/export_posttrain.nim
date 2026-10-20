@@ -33,9 +33,13 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in 1 .. episodes:
     var selection = initialSelection
-    if selection.variant == pvMixed: selection.seed += seed - 1
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+    inc wordingCounts[partition]
     let episode = "cogchemists-" & variant & "-" & $seed & "-" &
       $selection.selectedVariant & "-" & $selection.seed
     variantConfig["seed"] = %seed

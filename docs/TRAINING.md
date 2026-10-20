@@ -84,7 +84,8 @@ and reference variants require an evaluation split; teacher export rejects them.
 Private decision metadata includes the bank and exact system/user message hashes.
 
 Append `PROMPT_VARIANT PROMPT_SEED` to the exporter command. Mixed export advances
-the prompt seed per game. Episode IDs distinguish wordings; scenario-family IDs
+the prompt seed separately within each split, keeping all five wordings available
+in training despite every-fifth-seed validation. Episode IDs distinguish wordings; scenario-family IDs
 exclude wording and game variant, preserving train/validation separation.
 Export from a clean committed checkout. Original train/validation JSONL files
 remain the dataset interface; no additional hosted capture protocol is introduced.
