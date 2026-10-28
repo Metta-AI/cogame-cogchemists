@@ -56,6 +56,12 @@ only with a reagent that must expose the claim); `PLAYER_SCRIPTED=quack` fields 
 careerist. Both also play **every** seat when no LLM credentials are present, so offline
 certification and the docker smoke always complete without a network call.
 
+For real-model posttraining, enable the private native decision trajectory with
+`COGAME_SAVE_TRAJECTORY_URI`. It preserves the actual parallel requests, retries,
+received responses and applied actions without changing play. Scripted fallbacks,
+normalized replies and proposals rejected during initiative resolution are not
+real-model training targets. See [the capture workflow](docs/TRAINING.md).
+
 ## Layout
 
 ```

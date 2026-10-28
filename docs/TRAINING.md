@@ -1,5 +1,42 @@
 # Cogchemists post-training
 
+## Native real-model capture
+
+Use the production game and `/bin/cogchemists-player` with a `PLAYER_PROMPT`
+and hosted LLM credentials. Omit `PLAYER_SCRIPTED`. Set the private artifact
+destination `COGAME_SAVE_TRAJECTORY_URI` on the game; hosted collection sets it
+through the platform. With no destination, capture is disabled.
+
+Capture records the actual Curly request bodies, exposed call-ID headers,
+received response bodies, retries, private phase-opening observations and final
+applied actions. All seats still infer in the same parallel batch and resolve
+in the original initiative order. A proposal legal at phase opening can lose
+to an earlier seat: its proposed response is retained, its applied action is
+recorded as a pass, and the decision is rejected for training. Scripted
+fallbacks and speech/notebook normalization are also excluded. Unavailable
+usage, tokenizer identities and token likelihoods remain unknown.
+
+Use the research package's `collect-hosted`, `prepare-hosted-data` and SLIME
+workflow for authenticated receipt admission and token/mask checks. Capturing
+a trace alone establishes neither strategic quality nor online RL readiness.
+Families use the actual chemistry seed across both variants and wordings;
+keep each family in one split and verify physical independence when collecting.
+
+The complete native capture system check uses production binaries and a
+loopback fixture provider; fixture responses are testing evidence, not teachers:
+
+```sh
+nim c -d:release --path:src -o:/tmp/cogchemists src/cogchemists.nim
+nim c -d:release --path:src -o:/tmp/cogchemists-player src/cogchemists_player.nim
+python3 tools/test_native_capture.py /tmp/cogchemists /tmp/cogchemists-player /tmp/cogchemists-native-capture
+```
+
+It checks full games in both variants with capture on and off, identical
+outcomes/replays, initiative conflicts, retries, fallback, normalization,
+private operator isolation and missing usage. It refuses to overwrite output.
+
+## Historical scripted teacher
+
 The exporter runs complete production matches with the shipped `assayer`
 teacher. Each phase records the acting seat's hosted system and user prompts
 and a reply accepted by the game's parser and initiative resolution. Four decisions are made against
@@ -83,7 +120,8 @@ the prompt seed separately within each split, keeping all five wordings availabl
 in training despite every-fifth-seed validation. Episode IDs distinguish wordings; scenario-family IDs
 exclude wording and game variant, preserving train/validation separation.
 Export from a clean committed checkout. Original train/validation JSONL files
-remain the dataset interface; no additional hosted capture protocol is introduced.
+remain the historical scripted dataset interface. Native real-model capture uses
+the private trajectory described above.
 
 `tools/test_prompt_variants.py BRIDGE_BINARY` plays 16 complete games across both
 variants, seven direct wordings and one mixed selection. The existing exporter
