@@ -32,6 +32,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  training,
   prompts,
   sim
 
@@ -41,6 +42,7 @@ const
 
 type
   GameState = object
+    trajectory: DecisionTrajectory
     config: GameConfig
     selection: PromptSelection
     sim: Sim
@@ -178,6 +180,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     grace = state.config.shutdownGraceSeconds
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    state.trajectory.finishNativeTrajectory(state.sim)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -277,6 +280,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var scripted: seq[ScriptKind]
       var order: seq[int]
       var structural = false
+      var privateViews: seq[JsonNode]
       withLock stateLock:
         if state.sim.done:
           break
@@ -292,6 +296,11 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           prompts = state.prompts
           scripted = state.scripted
           order = initiativeOrder(state.sim.round)
+          if not state.trajectory.isNil:
+            for seat in seats:
+              privateViews.add(%*{"view": state.sim.observationJson(seat),
+                "operator_prompt": prompts[seat], "round": state.sim.round,
+                "phase": $state.sim.phase})
           echo "cogchemists: round ", state.sim.round + 1, "/", config.rounds,
             " ", $state.sim.phase, " at ", (epochTime() - gameStart).int, "s"
       if structural:
@@ -369,6 +378,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           ## twice and took the scripted move is recorded scripted: true —
           ## the same as a configured scripted seat or a disabled client.
           let wasScripted = fromScript[position]
+          var engineRejected = false
+          var resolutionReason = ""
+          var applied = decision
+          if not config.talk: applied.say = ""
           try:
             state.sim.applyAct(seat, decision, wasScripted)
             echo "cogchemists: ", state.sim.names[seat], " plays ",
@@ -379,6 +392,14 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             echo "cogchemists: ", state.sim.names[seat], " rejected (",
               error.msg, "); passing"
             state.sim.applyRejection(seat, decision, error.msg, wasScripted)
+            engineRejected = true
+            resolutionReason = error.msg
+            applied = newAction("pass", say = applied.say, notes = applied.notes)
+          if not state.trajectory.isNil:
+            state.trajectory.recordAppliedDecision(config, state.selection,
+              simCopy.round * 2 + ord(simCopy.phase), seat, privateViews[position],
+              applied.actionReply(), wasScripted, engineRejected, resolutionReason,
+              client.nativeAttempts[seat])
         state.broadcastLocked()
 
       if config.turnDelayMs > 0:
@@ -627,6 +648,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.selection = promptSelection(if runtimeConfig.config.len == 0:
     newJObject() else: parseJson(runtimeConfig.config))
   state.sim = initSim(config)
+  state.trajectory = initNativeTrajectory(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   state.external = newSeq[bool](config.players.len)

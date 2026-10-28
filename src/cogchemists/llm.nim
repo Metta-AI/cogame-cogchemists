@@ -20,10 +20,11 @@
 ## load-bearing. The same scripted bots are also fieldable policies.
 
 import
-  std/[json, os, random, strutils, times, unicode],
+  std/[json, options, os, random, strutils, times, unicode],
   bitworld/runtime,
   curly,
   sim,
+  training,
   prompts
 
 const
@@ -55,6 +56,7 @@ type
     timeoutSeconds: int
     minBatchSpacingMs*: int  ## wall-clock floor between batch STARTS
     lastBatchAt: float
+    nativeAttempts*: seq[seq[DecisionAttempt]]
     disabled*: bool   ## true once credentials are known-unavailable
 
 proc parseScriptKind*(text: string): ScriptKind =
@@ -761,6 +763,8 @@ proc decideAll*(
   ## model reply: a configured scripted seat, a disabled client, AND a seat
   ## that fell back after its retry. The caller records exactly this flag,
   ## so a fallback is never recorded as a real decision.
+  let capture = getEnv(CogameSaveTrajectoryUriEnv).len > 0
+  if capture: client.nativeAttempts = newSeq[seq[DecisionAttempt]](Seats)
   result = newSeq[Action](seats.len)
   fromScript = newSeq[bool](seats.len)
   var open: seq[int]     ## indexes into `seats` still undecided
@@ -776,6 +780,7 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var pendingEvidence: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
@@ -783,26 +788,46 @@ proc decideAll*(
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object, copying one line of LEGAL MOVES.")
       let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
+      if capture:
+        pendingEvidence.add(nativeAttempt(sim.config.players[seat].name,
+          sim.round * 2 + ord(sim.phase), seat, attempt, request.body))
       batch.post(request.url, request.headers, request.body, $index)
     client.awaitBatchSlot()
     client.lastBatchAt = epochTime()
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
+    let latencyMs = int((epochTime() - client.lastBatchAt) * 1000.0)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence: DecisionAttempt
+      if capture: evidence = pendingEvidence[position]
       try:
+        if capture:
+          evidence.receiveNativeResponse(responses[position].response,
+            responses[position].error, latencyMs)
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        let action = parseReply(sim, seat, extractJsonObject(text))
+        let payload = extractJsonObject(text)
+        let action = parseReply(sim, seat, payload)
         ## Reject moves the rules refuse HERE, so the retry carries the
         ## hint instead of the episode taking a silent fallback.
         var probe = sim
         probe.applyAct(seat, action, false)
+        if capture:
+          var applied = action
+          if not sim.config.talk: applied.say = ""
+          evidence.parsedAction = applied.actionReply()
+          evidence.accepted = payload{"say"}.getStr() == applied.say and
+            payload{"notes"}.getStr() == applied.notes
+          if not evidence.accepted:
+            evidence.rejectionReason = some("native parser normalized speech or notebook")
         result[index] = action
       except CatchableError as error:
+        if capture: evidence.rejectionReason = some(error.msg)
         echo "cogchemists llm: seat ", seat, " attempt ", attempt,
           " failed: ", error.msg
         stillOpen.add(index)
+      if capture: client.nativeAttempts[seat].add(evidence)
     open = stillOpen
   for index in open:
     let seat = seats[index]
